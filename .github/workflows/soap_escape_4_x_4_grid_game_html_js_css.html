@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Soap Escape — 5x5 타일 탈출 게임 (Responsive)</title>
+  <title>Soap Escape — 4x4 타일 탈출 게임 (Responsive)</title>
   <style>
     :root{
       --bg:#0f1220; --panel:#171a2b; --text:#e8ecff; --muted:#9aa3c7;
@@ -88,11 +88,12 @@
     /* 모바일 최적화 */
     @media (max-width:600px){
       .hud{ grid-template-columns:1fr 1fr; row-gap:6px }
-      /* .controls{ grid-template-columns:1fr; } */
-      
+      /* 기존: 세로 스택
+      .controls{ grid-template-columns:1fr; }
+      */
+      /* 변경: 모바일에서도 3열 유지 */
       .controls{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
-      /* .btn{ padding:10px 16px; font-size:18px; border-radius:14px } */
-      .btn{ padding:10px 12px; font-size:16px; border-radius:14px; }
+      .btn{ padding:10px 12px; font-size:16px; border-radius:14px }
       .kv{ grid-template-columns:1fr }
     }
   </style>
@@ -121,7 +122,7 @@
       <div class="section">
         <h3>플레이 방법</h3>
         <div class="hint">
-          비누는 <b>5×5 타일</b>의 선(격자선) 위만 이동합니다. 매 갈림길에서 왼쪽/오른쪽 회전 <b>예약</b>을 누르면
+          비누는 <b>4×4 타일</b>의 선(격자선) 위만 이동합니다. 매 갈림길에서 왼쪽/오른쪽 회전 <b>예약</b>을 누르면
           <b>다음 갈림길</b>에 마지막 입력이 적용돼요. 창문은 시작 시 랜덤 벽 노드에 생성되어 <b>40초 후</b> 열립니다.
         </div>
       </div>
@@ -129,7 +130,7 @@
       <div class="section">
         <h3>현재 설정</h3>
         <div class="kv">
-          <div>격자/노드</div><div><b>5×5 타일</b> → 교차점 <b>6×6</b></div>
+          <div>격자/노드</div><div><b>4×4 타일</b> → 교차점 <b>5×5</b></div>
           <div>비누 속도</div><div><b>2.0 노드/초</b></div>
           <div>조작키</div><div><b>A/⟵</b>=왼쪽, <b>D/⟶</b>=오른쪽</div>
         </div>
@@ -209,7 +210,7 @@
   // 게임 상태
   const DIRS=[{x:1,y:0},{x:0,y:1},{x:-1,y:0},{x:0,y:-1}];
   const G={
-    gridTiles:5, gridNodes:6,
+    gridTiles:4, gridNodes:5,
     margin:40, // DPR/폭에 맞춰 resize에서 재계산
     pendingTurn:null, running:false, stageIndex:0,
     startMs:0, elapsedMs:0, lastFrame:0,
@@ -269,11 +270,12 @@
   // ===== 이동/충돌 =====
   function stepToNextEdge(){
     const curr=G.nodeB, dirVec=DIRS[G.dir], next={x:curr.x+dirVec.x, y:curr.y+dirVec.y};
-    const goingOutside = (next.x<0||next.x>5||next.y<0||next.y>5);
+    const max = G.gridNodes - 1;
+    const goingOutside = (next.x<0||next.x>max||next.y<0||next.y>max);
     if(goingOutside){
       const atWindow = (curr.x===G.window.x && curr.y===G.window.y);
       if(atWindow && G.window.opened){ logEvent('EXIT',`창문 node=(${curr.x},${curr.y})`); endGame('clear'); }
-      else { const side=(curr.y===0?'TOP':(curr.y===5?'BOTTOM':(curr.x===0?'LEFT':'RIGHT'))); logEvent('CRASH',`벽 (${side}) node=(${curr.x},${curr.y})`); endGame('fail','벽에 충돌 (창문 닫힘)'); }
+      else { const side=(curr.y===0?'TOP':(curr.y===max?'BOTTOM':(curr.x===0?'LEFT':'RIGHT'))); logEvent('CRASH',`벽 (${side}) node=(${curr.x},${curr.y})`); endGame('fail','벽에 충돌 (창문 닫힘)'); }
       return false;
     }
     G.nodeA=curr; G.nodeB=next; G.t=0;
@@ -289,11 +291,11 @@
     G.obstacles = G.obstacles.filter(o=>o.until>now);
     if(now<G.graceUntil || G.obstacles.length>=st.maxObstacles || now<G.nextSpawnAt) return;
 
-    // 모든 엣지 후보
-    const edges=[];
-    for(let y=0;y<=5;y++) for(let x=0;x<=5;x++){
-      if(x<5) edges.push({a:{x,y}, b:{x:x+1,y}});
-      if(y<5) edges.push({a:{x,y}, b:{x, y:y+1}});
+    // 모든 엣지 후보 (노드 인덱스 0..max)
+    const edges=[]; const max=G.gridNodes-1;
+    for(let y=0; y<=max; y++) for(let x=0; x<=max; x++){
+      if(x<max) edges.push({a:{x,y}, b:{x:x+1,y}});
+      if(y<max) edges.push({a:{x,y}, b:{x, y:y+1}});
     }
     // 창문 노드 포함 엣지 제외
     const safeEdges = edges.filter(e =>
@@ -378,8 +380,8 @@
     const usableW=canvas.width-G.margin*2, usableH=canvas.height-G.margin*2;
     const stepX=usableW/(G.gridNodes-1), stepY=usableH/(G.gridNodes-1);
     // 타일
-    for(let ty=0;ty<5;ty++){
-      for(let tx=0;tx<5;tx++){
+    for(let ty=0; ty<G.gridTiles; ty++){
+      for(let tx=0; tx<G.gridTiles; tx++){
         const x=G.margin+tx*stepX, y=G.margin+ty*stepY;
         ctx.fillStyle=((tx+ty)%2===0?'#0f1433':'#0d122d');
         ctx.fillRect(x,y,stepX,stepY);
@@ -401,7 +403,7 @@
   function drawWindow(){
     const p=nodeToXY({x:G.window.x,y:G.window.y});
     ctx.save(); ctx.translate(p.x,p.y);
-    let ax=0, ay=0;
+    let ax=0, ay=0; const max=G.gridNodes-1;
     if(G.window.side==='TOP') ay=-14; else if(G.window.side==='BOTTOM') ay=14;
     if(G.window.side==='LEFT') ax=-14; else if(G.window.side==='RIGHT') ax=14;
     const c = G.window.opened ? '#4dff88' : '#ffd166';
@@ -505,17 +507,18 @@
 
   // ===== 스타트 위치 & 창문 =====
   function pickRandomStart(){
+    const max=G.gridNodes-1;
     while(true){
-      const x=U.randInt(0,5), y=U.randInt(0,5); let dir=U.randInt(0,3);
-      if((x===0&&dir===2)||(x===5&&dir===0)||(y===0&&dir===3)||(y===5&&dir===1)) dir=(dir+1)%4;
+      const x=U.randInt(0,max), y=U.randInt(0,max); let dir=U.randInt(0,3);
+      if((x===0&&dir===2)||(x===max&&dir===0)||(y===0&&dir===3)||(y===max&&dir===1)) dir=(dir+1)%4;
       const a={x,y}, d=DIRS[dir], b={x:x+d.x, y:y+d.y};
-      if(b.x>=0 && b.x<=5 && b.y>=0 && b.y<=5){ G.nodeA=a; G.nodeB=b; G.dir=dir; G.t=0; return; }
+      if(b.x>=0 && b.x<=max && b.y>=0 && b.y<=max){ G.nodeA=a; G.nodeB=b; G.dir=dir; G.t=0; return; }
     }
   }
   function pickRandomWindow(){
-    const choices=[];
-    for(let i=1;i<=4;i++){
-      choices.push({x:i,y:0,side:'TOP'},{x:i,y:5,side:'BOTTOM'},{x:0,y:i,side:'LEFT'},{x:5,y:i,side:'RIGHT'});
+    const choices=[]; const max=G.gridNodes-1;
+    for(let i=1;i<=max-1;i++){
+      choices.push({x:i,y:0,side:'TOP'},{x:i,y:max,side:'BOTTOM'},{x:0,y:i,side:'LEFT'},{x:max,y:i,side:'RIGHT'});
     }
     const w=choices[U.randInt(0,choices.length-1)];
     G.window = { ...w, openAt: G.startMs + CONFIG.windowOpenMs, opened:false };
