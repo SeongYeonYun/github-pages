@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Soap Slide + Bubble Pop Demo</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; font-family: system-ui, Arial, sans-serif;
+    display: grid; min-height: 100vh; grid-template-rows: auto 1fr auto;
+    background: radial-gradient(1200px 800px at 30% -10%, #e8f4ff 0%, transparent 60%) fixed;
+  }
+  header, footer {
+    padding: 12px 16px;
+  }
+  header { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .btn {
+    padding:10px 14px; border-radius:12px; border:1px solid #bcd;
+    background:#fff; cursor:pointer; box-shadow:0 1px 6px rgba(0,0,0,.06);
+  }
+  .btn:active { transform: translateY(1px); }
+  .wrap {
+    display:grid; place-items:center; padding:10px;
+  }
+  .canvas-box {
+    width:min(92vw, 640px);
+    aspect-ratio: 1 / 1;
+    background: linear-gradient(180deg, rgba(255,255,255,.8), rgba(255,255,255,.6));
+    border-radius:20px; box-shadow:0 10px 40px rgba(0,0,0,.12);
+    border:1px solid rgba(120,160,200,.25);
+    padding:12px;
+  }
+  canvas { width:100%; height:100%; display:block; border-radius:14px; }
+  .hint { opacity:.7; font-size:12px; margin-top:6px; }
+</style>
+</head>
+<body>
+  <header>
+    <button class="btn" id="btnStart">▶ 시작</button>
+    <button class="btn" id="btnPause">⏸ 정지</button>
+    <button class="btn" id="btnLeft">⬅ 좌회전 예약</button>
+    <button class="btn" id="btnRight">우회전 예약 ➡</button>
+    <span class="hint">키보드 ← / → 로도 가능 · 다음 교차점에서 적용</span>
+  </header>
+
+  <main class="wrap">
+    <div class="canvas-box">
+      <canvas id="game" width="1024" height="1024"></canvas>
+    </div>
+  </main>
+
+  <footer>
+    <div class="hint">그리드 5×5 타일선 위로 미끄러지는 비누 · 지나간 자리에 거품이 생기고 2초 후 팝</div>
+  </footer>
+
+<script>
+/* =========================
+   기본 설정(그리드/비누/물리)
+   ========================= */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+const GRID_N = 5;          // 5x5 타일
+let tile = 128;            // 내부 렌더 기준 타일(px) — 실제 크기는 DPI에 맞춰 스케일
+let gridSize = GRID_N * tile;
+
+// 미끄러짐 파라미터
+const maxSpeed = 420;
+const accel = 2200;
+const drag = 2.2;
+const cornerR = 18;
+const restitution = 0.15;
+
+// 상태
+let pos = { x: 2.5*tile, y: 2.5*tile };
+let dir = { x: 1, y: 0 };
+let vel = { x: 0, y: 0 };
+let nextTurn = 0; // -1:좌, 0:직진, 1:우
+let corner = null; // 원호 회전 상태
+let running = false;
+
+// 입력
+document.getElementById('btnLeft').onclick  = ()=> nextTurn = -1;
+document.getElementById('btnRight').onclick = ()=> nextTurn =  1;
+document.addEventListener('keydown', (e)=>{
+  if (e.key === 'ArrowLeft')  nextTurn = -1;
+  if (e.key === 'ArrowRight') nextTurn =  1;
+});
+
+// DPI 스케일(선명한 캔버스)
+function fitCanvas() {
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const box = canvas.parentElement.getBoundingClientRect();
+  canvas.width  = Math.round(box.width * dpr);
+  canvas.height = Math.round(box.height * dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0); // 이후 draw는 CSS px 기준
+  // 내부 논리 크기를 박스 폭으로 맞춰 타일 재설정
+  tile = (Math.min(box.width, box.height)) / GRID_N;
+  gridSize = GRID_N * tile;
+}
+window.addEventListener('resize', fitCanvas);
+fitCanvas();
+
+// 유틸
+const len = (v)=> Math.hypot(v.x, v.y);
+const rotLeft  = (v)=> ({x:-v.y, y: v.x});
+const rotRight = (v)=> ({x: v.y, y:-v.x});
+
+function atJunction(p) {
+  const gx = Math.round(p.x / tile), gy = Math.round(p.y / tile);
+  // 스냅 허용 오차
+  return Math.abs(p.x - gx*tile) < 2 && Math.abs(p.y - gy*tile) < 2;
+}
+
+function beginCorner(turn) {
+  const toDir = turn < 0 ? rotLeft(dir) : rotRight(dir);
+  const jx = Math.round(pos.x / tile) * tile;
+  const jy = Math.round(pos.y / tile) * tile;
+
+  const tVec = { x: dir.x * cornerR, y: dir.y * cornerR };
+  const nVec = { x: (turn<0 ? -dir.y :  dir.y) * cornerR,
+                 y: (turn<0 ?  dir.x : -dir.x) * cornerR };
+  const cx = jx + tVec.x + nVec.x;
+  const cy = jy + tVec.y + nVec.y;
+
+  const start = Math.atan2(pos.y - cy, pos.x - cx);
+  const end   = Math.atan2(jy + toDir.y*cornerR - cy, jx + toDir.x*cornerR - cx);
+
+  let delta = end - start;
+  if (turn < 0 && delta < 0) delta += Math.PI*2;
+  if (turn > 0 && delta > 0) delta -= Math.PI*2;
+
+  const speed = Math.max(80, Math.min(maxSpeed, len(vel)));
+  const angSpeed = (speed / Math.max(1, cornerR)) * Math.sign(delta);
+
+  corner = { cx, cy, startAng:start, endAng:end, ang:start, angSpeed, toDir };
+}
+
+/* =========================
+   거품 파티클(2초 후 팝)
+   ========================= */
+const BUBBLE_LIFE = 2.0;
+const POP_TIME = 0.18;
+const EMIT_PER_PX = 0.018;
+const MIN_R = 3, MAX_R = 10;
+const UP_FLOAT = 12;
+const DRIFT = 10;
+const FADE = 0.25;
+
+const POOL_SIZE = 600;
+const bubbles = new Array(POOL_SIZE).fill(null).map(()=>({
+  alive:false, x:0, y:0, r:0, vx:0, vy:0, born:0, life:BUBBLE_LIFE, alpha:1,
+  state:0, popT:0,
+}));
+let poolHead = 0;
+let lastEmitPos = null;
+
+function emitBubblesByMotion(dt) {
+  if (!lastEmitPos) { lastEmitPos = {x:pos.x, y:pos.y}; return; }
+  const dx = pos.x - lastEmitPos.x, dy = pos.y - lastEmitPos.y;
+  const dist = Math.hypot(dx, dy);
+  let expected = dist * EMIT_PER_PX;
+  while (expected > 0) {
+    if (Math.random() < Math.min(1, expected)) spawnBubble(pos.x, pos.y);
+    expected -= 1;
+  }
+  lastEmitPos.x = pos.x; lastEmitPos.y = pos.y;
+}
+function spawnBubble(x, y) {
+  const b = bubbles[poolHead];
+  poolHead = (poolHead + 1) % POOL_SIZE;
+
+  b.alive = true; b.state = 0; b.popT = 0;
+  b.x = x + (Math.random()*6-3);
+  b.y = y + (Math.random()*6-3);
+  b.r = rand(MIN_R, MAX_R);
+  b.vx = (Math.random()*2-1) * DRIFT;
+  b.vy = -UP_FLOAT - Math.random()*UP_FLOAT*0.6;
+  b.born = performance.now() / 1000;
+  b.life = BUBBLE_LIFE * rand(0.9, 1.1);
+  b.alpha = 0.9;
+}
+function rand(a,b){ return a + Math.random()*(b-a); }
+
+function updateBubbles(dt) {
+  const now = performance.now() / 1000;
+  for (let i=0;i<POOL_SIZE;i++){
+    const b = bubbles[i];
+    if (!b.alive) continue;
+    if (b.state === 0) {
+      const age = now - b.born;
+      if (age >= b.life) { b.state = 1; b.popT = 0; continue; }
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.r *= (1 + 0.12 * dt);
+      b.alpha = Math.max(0, 0.9 - age * FADE);
+    } else {
+      b.popT += dt;
+      const t = b.popT / POP_TIME;
+      if (t >= 1) { b.alive = false; continue; }
+      b.r *= (1 + 5.0 * dt);
+      b.alpha = Math.max(0, 0.6 * (1 - t*1.2));
+    }
+  }
+}
+
+function drawBubbles(ctx) {
+  const prevComposite = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i=0;i<POOL_SIZE;i++){
+    const b = bubbles[i];
+    if (!b.alive || b.alpha <= 0.01) continue;
+    ctx.save();
+    ctx.globalAlpha = b.alpha;
+    if (b.state === 0) {
+      const grad = ctx.createRadialGradient(b.x - b.r*0.4, b.y - b.r*0.4, b.r*0.1, b.x, b.y, b.r);
+      grad.addColorStop(0, 'rgba(255,255,255,0.35)');
+      grad.addColorStop(0.7,'rgba(180,220,255,0.18)');
+      grad.addColorStop(1, 'rgba(180,220,255,0.0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill();
+      ctx.lineWidth = Math.max(1, b.r*0.12);
+      ctx.strokeStyle = 'rgba(240,250,255,0.7)';
+      ctx.stroke();
+    } else {
+      ctx.lineWidth = Math.max(1, b.r*0.08);
+      ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  ctx.globalCompositeOperation = prevComposite;
+}
+
+/* =========================
+   렌더링
+   ========================= */
+function drawGrid() {
+  // 바닥 타일 느낌
+  ctx.fillStyle = 'rgba(230,245,255,0.6)';
+  ctx.fillRect(0,0,gridSize,gridSize);
+
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = 'rgba(140,170,200,0.7)';
+  for (let i=0;i<=GRID_N;i++){
+    const p = i*tile;
+    ctx.beginPath(); ctx.moveTo(0,p); ctx.lineTo(gridSize,p); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(p,0); ctx.lineTo(p,gridSize); ctx.stroke();
+  }
+}
+
+function drawSoap() {
+  // 비누(타원): 진행방향으로 약간 길게
+  const r = Math.max(10, tile*0.18);
+  const long = r*1.4;
+  const angle = Math.atan2(dir.y, dir.x);
+  ctx.save();
+  ctx.translate(pos.x, pos.y);
+  ctx.rotate(angle);
+  const grad = ctx.createLinearGradient(-long, -r, long, r);
+  grad.addColorStop(0, 'rgba(255,255,255,0.95)');
+  grad.addColorStop(1, 'rgba(180,220,255,0.9)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, long, r, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.lineWidth = 1.6;
+  ctx.strokeStyle = 'rgba(160,190,220,0.9)';
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* =========================
+   메인 업데이트 루프
+   ========================= */
+let last = performance.now();
+function loop() {
+  if (!running) { requestAnimationFrame(loop); return; }
+  const now = performance.now();
+  const dt = Math.min(0.033, (now - last) / 1000);
+  last = now;
+
+  // === 이동/코너 ===
+  if (corner) {
+    corner.ang += corner.angSpeed * dt;
+    const done = (corner.angSpeed > 0 && corner.ang >= corner.endAng) ||
+                 (corner.angSpeed < 0 && corner.ang <= corner.endAng);
+    const ang = done ? corner.endAng : corner.ang;
+    pos.x = corner.cx + Math.cos(ang) * cornerR;
+    pos.y = corner.cy + Math.sin(ang) * cornerR;
+    vel.x *= Math.exp(-drag * dt);
+    vel.y *= Math.exp(-drag * dt);
+    if (done) {
+      dir = corner.toDir;
+      const v = Math.max(0, len(vel));
+      vel = { x: dir.x * v, y: dir.y * v };
+      corner = null;
+    }
+  } else {
+    // 직선 구간
+    vel.x += dir.x * accel * dt;
+    vel.y += dir.y * accel * dt;
+    vel.x *= Math.exp(-drag * dt);
+    vel.y *= Math.exp(-drag * dt);
+    const v = len(vel);
+    if (v > maxSpeed) { vel.x = vel.x/v*maxSpeed; vel.y = vel.y/v*maxSpeed; }
+    pos.x += vel.x * dt;
+    pos.y += vel.y * dt;
+    if (atJunction(pos) && nextTurn !== 0) {
+      pos.x = Math.round(pos.x / tile) * tile;
+      pos.y = Math.round(pos.y / tile) * tile;
+      beginCorner(nextTurn);
+      nextTurn = 0;
+    }
+  }
+
+  // === 경계 충돌(그리드 내부 한정) ===
+  const minX = 0, maxX = gridSize, minY = 0, maxY = gridSize;
+  if (pos.x < minX) { pos.x = minX; vel.x = -vel.x*(1-restitution); }
+  if (pos.x > maxX) { pos.x = maxX; vel.x = -vel.x*(1-restitution); }
+  if (pos.y < minY) { pos.y = minY; vel.y = -vel.y*(1-restitution); }
+  if (pos.y > maxY) { pos.y = maxY; vel.y = -vel.y*(1-restitution); }
+
+  // === 거품 파티클 ===
+  emitBubblesByMotion(dt);
+  updateBubbles(dt);
+
+  // === 렌더 ===
+  ctx.clearRect(0,0,canvas.width,canvas.height); // 안전
+  drawGrid();
+  drawSoap();
+  drawBubbles(ctx);
+
+  requestAnimationFrame(loop);
+}
+
+/* =========================
+   시작/정지 & 초기화
+   ========================= */
+function randomStart() {
+  // 격자선 교차점 중 랜덤
+  const gx = Math.floor(Math.random()*(GRID_N+1));
+  const gy = Math.floor(Math.random()*(GRID_N+1));
+  pos.x = gx*tile; pos.y = gy*tile;
+  // 4방향 중 랜덤
+  const dirs = [{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
+  dir = dirs[Math.floor(Math.random()*4)];
+  vel.x = vel.y = 0;
+  corner = null;
+  nextTurn = 0;
+  lastEmitPos = null;
+  // 기존 버블 비활성화
+  bubbles.forEach(b=>b.alive=false);
+}
+document.getElementById('btnStart').onclick = ()=>{
+  randomStart();
+  running = true;
+};
+document.getElementById('btnPause').onclick = ()=> running = false;
+
+// 첫 프레임 루프 시작
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

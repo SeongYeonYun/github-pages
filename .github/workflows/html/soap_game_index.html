@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Soap Escape</title>
+  <link rel="stylesheet" href="../asset/css/soap_game.css">
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel game-panel">
+      <div class="hud">
+        <div>스테이지: <strong id="stageLabel">1 / 5</strong></div>
+        <div>경과: <strong id="timeLabel">0.0s</strong></div>
+        <div>창문: <strong id="windowLabel">닫힘 (40s 후 오픈)</strong></div>
+        <div class="pending-chip">다음 갈림길: <b id="pendingDir">직진</b></div>
+      </div>
+
+      <canvas id="gameCanvas" aria-label="game board" role="img"></canvas>
+
+      <div class="controls">
+        <button class="btn" id="btnLeft" title="A / ⟵">◀ 왼쪽 (Left)</button>
+        <button class="btn primary" id="btnStart" type="button">▶ 게임 시작</button>
+        <button class="btn" id="btnRight" title="D / ⟶">오른쪽 (Right) ▶</button>
+      </div>
+    </div>
+
+    <aside class="panel side-panel">
+      <div class="section">
+        <h3>플레이 방법</h3>
+        <div class="hint">
+          비누는 <b>4×4 타일</b>의 선(격자선) 위만 이동합니다. 매 갈림길에서 왼쪽/오른쪽 회전 <b>예약</b>을 누르면
+          <b>다음 갈림길</b>에 마지막 입력이 적용돼요. 창문은 시작 시 랜덤 벽 노드에 생성되어 <b>40초 후</b> 열립니다.
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>현재 설정</h3>
+        <div class="kv">
+          <div>격자/노드</div><div><b>4×4 타일</b> → 교차점 <b>5×5</b></div>
+          <div>비누 속도</div><div><b>2.0 노드/초</b></div>
+          <div>조작키</div><div><b>A/⟵</b>=왼쪽, <b>D/⟶</b>=오른쪽</div>
+        </div>
+      </div>
+
+      <div class="section" id="leaderboardSection">
+        <h3>순위표 (로컬)</h3>
+        <div style="max-height:260px; overflow:auto; margin-top:8px;">
+          <table>
+            <thead><tr><th style="width:56px">순위</th><th>이름</th><th>스테이지</th><th>결과</th><th>시간</th><th>날짜</th></tr></thead>
+            <tbody id="leaderboardBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>이벤트 로그</h3>
+        <div class="hint">입력/회전/충돌/탈출 시각을 <b>초단위</b>로 기록합니다.</div>
+        <pre id="logBox" class="log" aria-live="polite"></pre>
+        <button class="btn" id="btnClearLog">로그 비우기</button>
+      </div>
+    </aside>
+  </div>
+
+  <script type="application/json" id="stage-config">
+  {
+    "windowOpenMs": 40000,
+    "graceMs": 5000,
+    "speedNodesPerSec": 2.0,
+    "stages": [
+      { "maxObstacles": 10, "obstacleLifetimeMs": 5000, "obstacleSpawnIntervalMs": 1000 },
+      { "maxObstacles": 12, "obstacleLifetimeMs": 6000, "obstacleSpawnIntervalMs": 900 },
+      { "maxObstacles": 14, "obstacleLifetimeMs": 7000, "obstacleSpawnIntervalMs": 800 },
+      { "maxObstacles": 16, "obstacleLifetimeMs": 8000, "obstacleSpawnIntervalMs": 700 },
+      { "maxObstacles": 18, "obstacleLifetimeMs": 9000, "obstacleSpawnIntervalMs": 600 }
+    ]
+  }
+  </script>
+
+  <!-- JS 모듈 분리: 순서 중요 (utils -> obstacles -> core) -->
+  <script src="../asset/js/soap_utils.js"></script>
+  <script src="../asset/js/soap_obstacles.js"></script>
+  <script src="../asset/js/soap_game_core.js"></script>
+</body>
+</html>
