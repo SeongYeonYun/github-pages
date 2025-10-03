@@ -23,7 +23,7 @@ public class soapCtrl extends HttpServlet {
 
 	protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
 		
-		System.out.println("get ");
+		System.out.println("get");
 		response.sendRedirect(request.getContextPath() + "/html/soap_game_index.html");
 		
 //		String ip = request.getRemoteAddr();
