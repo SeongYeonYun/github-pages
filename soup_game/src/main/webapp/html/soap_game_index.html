@@ -3,92 +3,87 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Soap Game — Stable Full Build</title>
-
-  <!-- 프로젝트 CSS (유지) -->
-  <link rel="stylesheet" href="../asset/css/soap_game.css">
+  <title>Soap Game — With Bubbles</title>
 
   <style>
-    /* 기본 레이아웃 */
-    html,body{height:100%;margin:0}
-    #game-root{height:100vh; display:flex; flex-direction:column; background: linear-gradient(150deg,#cfeffd 0%,#8fd8f4 18%,#6fbff5 55%,#4095f5 100%);}
-    #header-area{height:80px; display:flex; align-items:center; gap:12px; padding:8px;}
-    #game-board{ position:relative; overflow:hidden; flex:1; min-height:320px; }
+    /* == soap_game.css (embedded) == */
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; padding: 0; -webkit-font-smoothing:antialiased; }
+    body { font-family: "Noto Sans KR", system-ui, -apple-system, "Segoe UI", Roboto; color:#052b2f; background: linear-gradient(150deg,#cfeffd 0%,#8fd8f4 18%,#6fbff5 55%,#4095f5 100%); }
 
-    /* 비누 */
-    #soup_item{
-      position:absolute;
-      width:48px;
-      z-index:40;
-      touch-action:none;
-      user-select:none;
-      -webkit-user-drag:none;
-      /* translate(-50%,-50%) 기준으로 left/top을 중앙 픽셀로 유지 */
-      transform: translate(-50%,-50%) rotate(0deg);
-      transition: transform 140ms linear;
-      will-change: left, top, transform;
+    #game-root { position: relative; width:100%; height:100vh; overflow:hidden; display:flex; flex-direction:column; z-index:0; }
+    #header-area { position:relative; width:100%; height:64px; padding:8px 12px; display:flex; align-items:center; gap:12px; }
+
+    #pauseBtn { position:absolute; right:12px; top:12px; width:38px; height:38px; background:transparent; border:0; cursor:pointer; z-index:1000; }
+    #pauseBtn img{ width:100%; height:100%; display:block; }
+
+    #timer { position:absolute; top:14px; left:50%; transform:translateX(-50%); width:min(420px,80%); height:22px; border-radius:24px; padding:3px; background: linear-gradient(180deg, rgba(255,255,255,0.16), rgba(0,0,0,0.03)); box-shadow: inset 0 2px 6px rgba(0,0,0,0.18); z-index:200; }
+    #timer .fill{ position:absolute; top:0; left:0; width:28%; height:100%; border-radius:20px; background:#00bcd4; transition: width .3s ease-out; }
+
+    #game-board { position:relative; width:100%; flex:1 1 auto; aspect-ratio:1/1; display:flex; align-items:center; justify-content:center; padding:0; }
+
+    /* scene image styling */
+    #scene-img { width:100%; height:60%; object-fit:cover; user-select:none; z-index:5; margin-bottom:60%; display:block; }
+
+    /* soap item */
+    #soup_item{ position:absolute; width:48px; z-index:60; touch-action:none; user-select:none; -webkit-user-drag:none; transform:translate(-50%,-50%) rotate(0deg); transition: transform 140ms linear; will-change:left,top,transform; pointer-events:none; }
+
+    /* bubble layer and bubble style */
+    #bubble-layer{ position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none; z-index:55; }
+    .bubble{ position:absolute; transform:translate(-50%,-50%); border-radius:50%; background:rgba(255,255,255,0.92); box-shadow:0 2px 8px rgba(0,0,0,0.12); pointer-events:none; }
+
+    /* bubble animation: float up and fade + slight scale */
+    @keyframes bubbleRise {
+      0% { transform: translate(-50%,-50%) translateY(0) scale(0.9); opacity:0.95; }
+      30% { transform: translate(-50%,-80%) scale(1.05); opacity:0.95; }
+      100%{ transform: translate(-50%,-140%) scale(1.15); opacity:0; }
     }
 
-    /* DPAD: 이미지 + clip-path 버튼 */
-    #direction-buttons{
-      position:absolute; right:18px; bottom:18px;
-      z-index:260; width:180px; height:180px; touch-action:none;
-    }
-    #direction-buttons img{ width:100%; height:100%; display:block; pointer-events:none; user-select:none; -webkit-user-drag:none; }
-    /* each button covers whole container, clip-path limits active area to triangular fan */
-    #direction-buttons button{ position:absolute; left:0; top:0; width:100%; height:100%; background:transparent; border:0; padding:0; margin:0; z-index:270; cursor:pointer; opacity:0; touch-action:none; -webkit-tap-highlight-color: rgba(0,0,0,0); }
-    #up-btn    { clip-path: polygon(50% 50%, 0% 0%, 100% 0%); }
-    #right-btn { clip-path: polygon(50% 50%, 100% 0%, 100% 100%); }
-    #down-btn  { clip-path: polygon(50% 50%, 100% 100%, 0% 100%); }
-    #left-btn  { clip-path: polygon(50% 50%, 0% 100%, 0% 0%); }
+    /* DPAD */
+    #direction-buttons{ position:absolute; right:18px; bottom:18px; width:180px; height:180px; z-index:260; }
+    #direction-buttons img{ width:100%; height:100%; display:block; pointer-events:none; }
+    #direction-buttons button{ position:absolute; left:0; top:0; width:100%; height:100%; background:transparent; border:0; padding:0; margin:0; z-index:270; cursor:pointer; opacity:0; }
+    #up-btn{ clip-path: polygon(50% 50%, 0% 0%, 100% 0%); }
+    #right-btn{ clip-path: polygon(50% 50%, 100% 0%, 100% 100%); }
+    #down-btn{ clip-path: polygon(50% 50%, 100% 100%, 0% 100%); }
+    #left-btn{ clip-path: polygon(50% 50%, 0% 100%, 0% 0%); }
 
-    /* debug: 눌리는 영역 시각화하려면 아래 클래스 주석 해제하거나 개발중에 추가하세요 */
-    /* .debug-show { opacity:0.18 !important; background: rgba(255,255,255,0.12) !important; } */
+    .hud{ position:absolute; left:14px; top:14px; z-index:300; background: rgba(255,255,255,0.85); padding:6px 8px; border-radius:8px; font-weight:600; font-size:13px; display:none; }
 
-    /* HUD small */
-    .hud{ position:absolute; left:14px; top:14px; z-index:300; background: rgba(255,255,255,0.7); padding:6px 8px; border-radius:8px; font-weight:600; font-size:13px; }
-
-    /* 모달 */
-    .modal { position:fixed; inset:0; display:none; align-items:center; justify-content:center; pointer-events:none; z-index:1000; }
-    .modal.visible { display:flex; pointer-events:auto; background: rgba(0,0,0,0.4); }
-    .modal .modal-content { width:min(540px,92%); padding:18px; background:#fff; border-radius:10px; box-shadow: 0 12px 30px rgba(0,0,0,0.25); }
-    .modal .close-btn { position:absolute; right:12px; top:8px; border:0; background:none; font-size:20px; cursor:pointer; }
-    .btn { border:0; padding:10px 14px; border-radius:8px; cursor:pointer; }
+    /* modal */
+    .modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; pointer-events:none; z-index:1000; }
+    .modal.visible{ display:flex; pointer-events:auto; background: rgba(0,0,0,0.4); }
+    .modal .modal-content{ width:min(540px,92%); padding:18px; background:#fff; border-radius:10px; box-shadow: 0 12px 30px rgba(0,0,0,0.25); }
+    .close-btn{ position:absolute; right:12px; top:8px; border:0; background:none; font-size:20px; cursor:pointer; }
+    .btn{ border:0; padding:10px 14px; border-radius:8px; cursor:pointer; }
     .btn.primary{ background:#0ea5c8; color:#fff; }
     .btn.warn{ background:#ef4444; color:#fff; }
 
-    /* responsive safety */
-    @media (max-width:420px){
-      #direction-buttons{ width:140px; height:140px; right:12px; bottom:12px;}
-      #soup_item{ width:40px; }
-    }
+    @media (max-width:420px){ #direction-buttons{ width:140px; height:140px; right:12px; bottom:12px; } #soup_item{ width:40px; } }
   </style>
 </head>
 <body>
   <div id="game-root" role="main" aria-label="Soap Game Root">
     <div id="header-area">
-      <div id="timer" role="timer" aria-live="polite" style="flex:1;">
-        <div class="fill" style="width:28%;"><div class="wave wave1"></div></div>
-      </div>
-      <button id="pauseBtn" aria-label="일시정지" title="일시정지" style="background:none;border:0;cursor:pointer">
-        <img src="../asset/img/StopB.png" alt="pause" style="width:36px;height:36px;">
-      </button>
+      <div id="timer" role="timer" aria-live="polite"><div class="fill"><div class="wave wave1"></div></div></div>
+      <button id="pauseBtn" aria-label="일시정지" title="일시정지"><img src="../asset/img/StopB.png" alt="pause"></button>
     </div>
 
     <div id="game-board" role="game-board" aria-label="Game Board">
-      <div id="hud" class="hud" aria-hidden="true" style="display:none">node: -, -</div>
+      <div id="hud" class="hud" aria-hidden="true">node: -, -</div>
 
-      <img id="soup_item" src="../asset/img/Comp_2_0000000.png" alt="soap item" />
+      <img id="soup_item" src="../asset/img/Comp_2_0000000.png" alt="soap item">
+      <img id="scene-img" src="../asset/img/BathROOM_0000527.jpg" alt="Scene background">
 
-      <img id="scene-img" src="../asset/img/BathROOM_0000527.jpg" alt="Scene background"
-           style="width:100%; height:60%; object-fit:cover; z-index:5; user-select:none; margin-bottom:60%;" />
+      <!-- bubble layer: bubbles are added/removed here -->
+      <div id="bubble-layer" aria-hidden="true"></div>
 
-      <div id="direction-buttons" aria-hidden="false" role="group" aria-label="directional pad">
-        <img id="dpad-img" src="../asset/img/BAD.png" alt="Directional Pad" />
-        <button id="up-btn"    data-dir="UP"    aria-label="위"></button>
+      <div id="direction-buttons" role="group" aria-label="directional pad">
+        <img id="dpad-img" src="../asset/img/BAD.png" alt="Directional Pad">
+        <button id="up-btn" data-dir="UP" aria-label="위"></button>
         <button id="right-btn" data-dir="RIGHT" aria-label="오른쪽"></button>
-        <button id="down-btn"  data-dir="DOWN"  aria-label="아래"></button>
-        <button id="left-btn"  data-dir="LEFT"  aria-label="왼쪽"></button>
+        <button id="down-btn" data-dir="DOWN" aria-label="아래"></button>
+        <button id="left-btn" data-dir="LEFT" aria-label="왼쪽"></button>
       </div>
     </div>
   </div>
@@ -106,12 +101,12 @@
     </div>
   </div>
 
-  <!-- Game Over Modal -->
+  <!-- GameOver Modal -->
   <div id="gameOverModal" class="modal" role="dialog" aria-modal="true" aria-hidden="true">
     <div class="modal-content" role="document">
       <button class="close-btn" id="goClose" aria-label="닫기">&times;</button>
       <h2 style="text-align:center;margin:6px 0 10px 0;">게임 오버</h2>
-      <p id="gameOverMsg" style="text-align:center; margin:8px 0 12px 0;">벽에 부딪혔습니다.</p>
+      <p id="gameOverMsg" style="text-align:center; margin:8px 0 12px 0;">허용 영역을 벗어났습니다.</p>
       <div style="display:flex; gap:10px; justify-content:center;">
         <button id="goRestart" class="btn primary">다시시작</button>
         <button id="goExit" class="btn warn">나가기</button>
@@ -119,29 +114,35 @@
     </div>
   </div>
 
-  <!-- 기존 스크립트(유지) -->
-  <script src="../asset/js/soap_utils_shim.js" defer></script>
-  <script src="../asset/js/soap_utils_patched.js" defer></script>
-  <script src="../asset/js/soap_obstacles.js" defer></script>
-  <script src="../asset/js/soap_game_core.js" defer></script>
-  <script src="../asset/js/soap_timer.js" defer></script>
-
-  <!-- 통합 스크립트: 안정된 그리드 이동 + 입력 + 모달 -->
+  <!-- 핵심 스크립트: board-local 기준 그리드 + 중심 보정 + 입력/루프 + bubbles -->
   <script>
-  document.addEventListener('DOMContentLoaded', function () {
-    /* ------------- 설정 ------------- */
-    const GRID_TILES_X = 4; // 칸 수(이미지의 빨간 격자에 맞춰 조정 가능)
-    const GRID_TILES_Y = 4;
-    const SPEED = 160;      // px/s
-    const EPS = 1.0;        // 노드 도달 판정(픽셀)
-    /* --------------------------------- */
+  document.addEventListener('DOMContentLoaded', function(){
+    // 설정
+    const TILES_X = 4, TILES_Y = 4;
+    const SPEED = 160; // px/s
+    const EPS = 0.6;   // 도달 허용 오차
 
-    // 요소 참조
-    const soup = document.getElementById('soup_item');
+    // 플레이어블 박스(원본 이미지 정규화 좌표) - 필요시 조정
+    const PLAYABLE_BOX = { left:0.17, top:0.14, right:0.83, bottom:0.86 };
+
+    // 이미지 중심 보정 (픽셀). 기본 0, 조정 필요 시 콘솔에서 setSoapOffset(x,y) 호출
+    let soapOffset = { x:0, y:0 };
+
+    // bubble params (조절 가능)
+    let bubbleParams = {
+      enabled: true,
+      interval: 120,      // ms between bubbles while moving
+      minSize: 6,         // px
+      maxSize: 18,        // px
+      lifeMin: 700,       // ms (animation duration)
+      lifeMax: 1300
+    };
+
     const board = document.getElementById('game-board');
+    const soup = document.getElementById('soup_item');
     const sceneImg = document.getElementById('scene-img');
     const hud = document.getElementById('hud');
-
+    const bubbleLayer = document.getElementById('bubble-layer');
     const dpadImg = document.getElementById('dpad-img');
     const dpadContainer = document.getElementById('direction-buttons');
 
@@ -158,370 +159,135 @@
     const goExit = document.getElementById('goExit');
     const gameOverMsg = document.getElementById('gameOverMsg');
 
-    if(!soup || !board){ console.error('필수 요소 없음'); return; }
+    if(!board || !soup || !sceneImg){ console.error('필수 요소 없음'); return; }
 
-    // 그리드/노드 상태
-    let grid = {
-      tilesX: GRID_TILES_X,
-      tilesY: GRID_TILES_Y,
-      tileSize: 64,
-      offsetX: 0,
-      offsetY: 0,
-      nodesX: GRID_TILES_X + 1,
-      nodesY: GRID_TILES_Y + 1
-    };
-
-    // 현재 노드 인덱스 (0..tilesX, 0..tilesY)
-    let node = { i: Math.floor(grid.tilesX/2), j: Math.floor(grid.tilesY/2) };
-    let dir = { x: 1, y: 0 };      // 현재 진행 방향
+    // 상태
+    let node = { i: Math.floor(TILES_X/2), j: Math.floor(TILES_Y/2) };
+    let dir = { x:1, y:0 };
     let queuedDir = null;
     let moving = true;
     let lastTs = null;
+    let lastBubbleTs = 0;
     let gameOver = false;
-    let lastDir = { x: 1, y: 0 };  // 마지막 유효 방향 보존
 
-    // 안전한 modal helpers
-    function showModal(el){
-      if(!el) return;
-      el.classList.add('visible');
-      el.setAttribute('aria-hidden','false');
-    }
-    function closeModal(el){
-      if(!el) return;
-      el.classList.remove('visible');
-      el.setAttribute('aria-hidden','true');
-    }
+    // 그리드 라인 좌표 (board-local px)
+    let pixelNodesX = new Array(TILES_X+1).fill(0);
+    let pixelNodesY = new Array(TILES_Y+1).fill(0);
 
-    // setGameRunning 제공 (다른 모듈과 충돌피하려면 덮어쓰기 하지 않음)
-    if(typeof window.setGameRunning !== 'function'){
-      window.setGameRunning = function(flag){ moving = !!flag; };
-    } else {
-      // wrap existing to also affect our moving flag
-      const orig = window.setGameRunning;
-      window.setGameRunning = function(flag){
-        try{ moving = !!flag; }catch(e){}
-        return orig(flag);
-      };
-    }
-
-    // triggerGameOver: 안전하게 노출
-    window.triggerGameOver = function(message){
-      gameOver = true;
-      moving = false;
-      if(gameOverMsg) gameOverMsg.textContent = message || '게임 오버';
-      showModal(gameOverModal);
-    };
-
-    // computeGrid: 보드 크기에 맞춰 타일 크기와 오프셋 계산
-    function computeGrid(){
-      const br = board.getBoundingClientRect();
-      const bw = Math.max(1, Math.floor(br.width));
-      const bh = Math.max(1, Math.floor(br.height));
-      // tile size chosen to fit both axes
-      const tileW = Math.floor(bw / grid.tilesX);
-      const tileH = Math.floor(bh / grid.tilesY);
-      const tileSize = Math.max(8, Math.min(tileW, tileH));
-      grid.tileSize = tileSize;
-      grid.nodesX = grid.tilesX + 1;
-      grid.nodesY = grid.tilesY + 1;
-      const usedW = grid.tilesX * tileSize;
-      const usedH = grid.tilesY * tileSize;
-      // center the used area in the board
-      grid.offsetX = Math.round((bw - usedW) / 2);
-      grid.offsetY = Math.round((bh - usedH) / 2);
-    }
-
-    // node -> pixel (board 좌표)
-    function nodeToPx(i, j){
-      return { x: grid.offsetX + i * grid.tileSize, y: grid.offsetY + j * grid.tileSize };
-    }
-
-    // 현재 비누 중심 픽셀 반환 (board 좌표계)
-    function getCurrentPixelPos(){
-      const srect = soup.getBoundingClientRect();
-      const brect = board.getBoundingClientRect();
-      return { x: (srect.left + srect.right) / 2 - brect.left, y: (srect.top + srect.bottom) / 2 - brect.top };
-    }
-
-    // 초기 위치: 이미지 로드 후 정확한 보드 크기로 보정
-    function initPosition(){
-      computeGrid();
-      node.i = Math.max(0, Math.min(grid.tilesX, node.i));
-      node.j = Math.max(0, Math.min(grid.tilesY, node.j));
-      const px = nodeToPx(node.i, node.j);
-      soup.style.left = px.x + 'px';
-      soup.style.top  = px.y + 'px';
-      soup.style.transform = `translate(-50%,-50%) rotate(0deg)`;
-      updateHUD();
-    }
-
-    // HUD 업데이트 (디버그용)
-    function updateHUD(){
-      if(!hud) return;
-      hud.style.display = 'block';
-      hud.textContent = `node: ${node.i},${node.j}  tile:${grid.tileSize}px`;
-    }
-
-    // applyDirection: 즉시 dir 변경 및 회전
-    function applyDirection(dx, dy){
-      if(gameOver) return;
-      if(Math.abs(dx) + Math.abs(dy) !== 1) return;
-      dir.x = dx; dir.y = dy;
-      queuedDir = null;
-      lastDir = { x: dx, y: dy };
-      const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-      // set transform with translate center
-      soup.style.transform = `translate(-50%,-50%) rotate(${angle}deg)`;
-    }
-
-    // changeDirection: 외부 호출 인터페이스 (버튼/키)
-    window.changeDirection = function(dx, dy){
-      if(gameOver) return;
-      if(typeof dx !== 'number' || typeof dy !== 'number') return;
-      if(dx === 0 && dy === 0) return;
-      const cur = getCurrentPixelPos();
-      const center = nodeToPx(node.i, node.j);
-      const dist = Math.hypot(cur.x - center.x, cur.y - center.y);
-      if(dist <= EPS + 0.01){
-        // 현재 노드에 있을 때 즉시 적용 가능 -> 하지만 먼저 다음 노드 영역 유효성 검사
-        const ni = node.i + dx, nj = node.j + dy;
-        if(ni < 0 || ni > grid.tilesX || nj < 0 || nj > grid.tilesY){
-          // 벽에 닿는 시도 -> 게임오버
-          window.triggerGameOver && window.triggerGameOver('벽에 부딪혔습니다');
-          return;
-        }
-        applyDirection(dx, dy);
-      } else {
-        // 이동 중이면 큐에 저장해 다음 노드에서 적용
-        queuedDir = { x: dx, y: dy };
-      }
-    };
-
-    // 메인 루프: 현재 node -> (node + dir) 를 목표로 이동
-    function loop(ts){
-      if(gameOver){ return; } // 멈춤
-      if(!lastTs) lastTs = ts;
-      const dt = (ts - lastTs) / 1000;
-      lastTs = ts;
-
-      computeGrid(); // 빠르게 재계산 (리사이즈 대응)
-      updateHUD();
-
-      if(moving){
-        let nextI = node.i + dir.x;
-        let nextJ = node.j + dir.y;
-
-        // 만약 이동 방향이 0,0 이면 queuedDir가 있으면 적용, 없으면 정지 상태(유지)
-        if(dir.x === 0 && dir.y === 0){
-          if(queuedDir){
-            // queuedDir이 벽을 향하면 게임오버, 아니면 적용
-            const ci = node.i + queuedDir.x, cj = node.j + queuedDir.y;
-            if(ci < 0 || ci > grid.tilesX || cj < 0 || cj > grid.tilesY){
-              window.triggerGameOver && window.triggerGameOver('벽에 부딪힐 예정입니다');
-              return;
-            } else {
-              applyDirection(queuedDir.x, queuedDir.y);
-              nextI = node.i + dir.x; nextJ = node.j + dir.y;
-            }
-          } else {
-            // 정지 상태
-            requestAnimationFrame(loop); return;
-          }
-        }
-
-        // Next node OOB check
-        if(nextI < 0 || nextI > grid.tilesX || nextJ < 0 || nextJ > grid.tilesY){
-          // 시도 중인 이동이 벽 밖이면 게임오버
-          window.triggerGameOver && window.triggerGameOver('벽에 부딪혔습니다');
-          return;
-        }
-
-        const target = nodeToPx(nextI, nextJ);
-        const cur = getCurrentPixelPos();
-        const vectX = target.x - cur.x;
-        const vectY = target.y - cur.y;
-        const dist = Math.hypot(vectX, vectY);
-
-        if(dist <= EPS){
-          // 목표 도달: 노드 갱신, 위치 스냅
-          node.i = nextI; node.j = nextJ;
-          soup.style.left = target.x + 'px';
-          soup.style.top  = target.y + 'px';
-          // 노드 도달 시 queuedDir 적용 우선
-          if(queuedDir){
-            const candI = node.i + queuedDir.x, candJ = node.j + queuedDir.y;
-            if(candI < 0 || candI > grid.tilesX || candJ < 0 || candJ > grid.tilesY){
-              window.triggerGameOver && window.triggerGameOver('벽에 부딪힐 예정입니다');
-              return;
-            } else {
-              applyDirection(queuedDir.x, queuedDir.y);
-            }
-          }
-        } else {
-          // 이동: 일정 속도로 이동
-          const move = Math.min(SPEED * dt, dist);
-          const nx = cur.x + (vectX / dist) * move;
-          const ny = cur.y + (vectY / dist) * move;
-          soup.style.left = nx + 'px';
-          soup.style.top  = ny + 'px';
+    // debug nodes 표시 (콘솔에서 toggle 가능)
+    let debugNodes = false;
+    let debugContainer = null;
+    function renderDebug(){
+      if(!debugNodes){ if(debugContainer){ debugContainer.remove(); debugContainer=null; } return; }
+      if(!debugContainer){ debugContainer = document.createElement('div'); debugContainer.style.position='absolute'; debugContainer.style.left='0'; debugContainer.style.top='0'; debugContainer.style.width='100%'; debugContainer.style.height='100%'; debugContainer.style.pointerEvents='none'; debugContainer.style.zIndex=9999; board.appendChild(debugContainer); }
+      debugContainer.innerHTML='';
+      for(let i=0;i<=TILES_X;i++){
+        for(let j=0;j<=TILES_Y;j++){
+          const x = pixelNodesX[i]; const y = pixelNodesY[j];
+          const dot = document.createElement('div');
+          dot.style.position='absolute'; dot.style.left=(x-3)+'px'; dot.style.top=(y-3)+'px'; dot.style.width='6px'; dot.style.height='6px'; dot.style.borderRadius='50%'; dot.style.background='rgba(255,0,0,0.95)'; dot.style.boxShadow='0 0 6px rgba(0,0,0,0.2)'; debugContainer.appendChild(dot);
         }
       }
-
-      requestAnimationFrame(loop);
     }
 
-    // 안전하게 시작: 이미지 로드 후 초기화
-    function startAfterLayout(){
-      initPosition();
-      moving = true;
-      lastTs = null;
-      gameOver = false;
-      // ensure HUD visible
-      if(hud) hud.style.display = 'block';
-      // start loop if not already
-      requestAnimationFrame(loop);
+    // board-local 그리드 계산: 모든 내부 좌표는 board-local 기준
+    function computeGridBoardLocal(){
+      const boardRect = board.getBoundingClientRect();
+      const imgRect = sceneImg.getBoundingClientRect();
+      const naturalW = sceneImg.naturalWidth || imgRect.width;
+      const naturalH = sceneImg.naturalHeight || imgRect.height;
+      const displayW = imgRect.width; const displayH = imgRect.height;
+      const scale = Math.max(displayW / naturalW, displayH / naturalH);
+      const renderedW = naturalW * scale; const renderedH = naturalH * scale;
+      const extraX = renderedW - displayW; const extraY = renderedH - displayH;
+      const imgLeftWindow = imgRect.left - (extraX/2);
+      const imgTopWindow  = imgRect.top  - (extraY/2);
+
+      const boxLeftWin = imgLeftWindow + PLAYABLE_BOX.left * renderedW;
+      const boxRightWin = imgLeftWindow + PLAYABLE_BOX.right * renderedW;
+      const boxTopWin = imgTopWindow + PLAYABLE_BOX.top * renderedH;
+      const boxBottomWin = imgTopWindow + PLAYABLE_BOX.bottom * renderedH;
+
+      const leftLocal = boxLeftWin - boardRect.left;
+      const rightLocal = boxRightWin - boardRect.left;
+      const topLocal = boxTopWin - boardRect.top;
+      const bottomLocal = boxBottomWin - boardRect.top;
+
+      const tileW = (rightLocal - leftLocal) / TILES_X;
+      const tileH = (bottomLocal - topLocal) / TILES_Y;
+
+      for(let i=0;i<=TILES_X;i++) pixelNodesX[i] = leftLocal + i*tileW;
+      for(let j=0;j<=TILES_Y;j++) pixelNodesY[j] = topLocal + j*tileH;
+
+      if(hud){ hud.style.display='block'; hud.textContent = `node:${node.i},${node.j} tile:${tileW.toFixed(1)}x${tileH.toFixed(1)}px`; }
+      renderDebug();
     }
 
-    // Wait for scene image to load (or timeout) to compute proper grid
-    let layoutReady = false;
-    function ensureLayoutReady(cb){
-      if(layoutReady){ cb(); return; }
-      // if sceneImg loaded
-      if(sceneImg && sceneImg.complete){
-        layoutReady = true; cb(); return;
-      }
-      // otherwise wait for load or short timeout
-      let done = false;
-      function go(){ if(done) return; done = true; layoutReady = true; cb(); }
-      if(sceneImg){
-        sceneImg.addEventListener('load', go, { once:true });
-      }
-      // fallback timeout
-      setTimeout(go, 250);
-    }
+    function nodeToBoardLocal(i,j){ const ii = Math.max(0,Math.min(TILES_X,i)); const jj = Math.max(0,Math.min(TILES_Y,j)); return { x: pixelNodesX[ii], y: pixelNodesY[jj] }; }
 
-    ensureLayoutReady(startAfterLayout);
+    function placeAtNodeBoardLocal(i,j){ const p = nodeToBoardLocal(i,j); const cx = p.x + soapOffset.x; const cy = p.y + soapOffset.y; soup.style.left = cx.toFixed(2) + 'px'; soup.style.top = cy.toFixed(2) + 'px'; }
 
-    /* ---------- 입력 처리: clip-path buttons + container fallback + keyboard ---------- */
-    const dirMap = {
-      'UP': { dx: 0, dy: -1, ch:'U' },
-      'RIGHT': { dx: 1, dy: 0, ch:'R' },
-      'DOWN': { dx: 0, dy: 1, ch:'D' },
-      'LEFT': { dx: -1, dy: 0, ch:'L' }
-    };
+    function getCenterBoardLocal(){ const s = soup.getBoundingClientRect(); const b = board.getBoundingClientRect(); const cx = (s.left + s.right)/2 - b.left; const cy = (s.top + s.bottom)/2 - b.top; return { x: cx, y: cy }; }
 
+    function applyDirection(dx,dy){ if(gameOver) return; if(Math.abs(dx)+Math.abs(dy)!==1) return; dir.x = dx; dir.y = dy; queuedDir = null; const angle = Math.atan2(dy,dx) * 180/Math.PI; soup.style.transform = `translate(-50%,-50%) rotate(${angle}deg)`; }
+
+    window.changeDirection = function(dx,dy){ if(gameOver) return; if(typeof dx!=='number' || typeof dy!=='number') return; if(dx===0 && dy===0) return; const cur = getCenterBoardLocal(); const center = nodeToBoardLocal(node.i,node.j); const dist = Math.hypot(cur.x-center.x, cur.y-center.y); if(dist <= EPS + 0.01){ const ni = node.i + dx, nj = node.j + dy; if(ni < 0 || ni > TILES_X || nj < 0 || nj > TILES_Y){ triggerGameOver('벽에 부딪혔습니다.'); return; } applyDirection(dx,dy); } else { queuedDir = { x:dx, y:dy }; } };
+
+    function triggerGameOver(msg){ gameOver = true; moving = false; if(gameOverMsg) gameOverMsg.textContent = msg||'게임 오버'; if(gameOverModal){ gameOverModal.classList.add('visible'); gameOverModal.setAttribute('aria-hidden','false'); } }
+
+    // bubble spawn helper
+    function rand(min,max){ return Math.random()*(max-min)+min; }
+    function spawnBubbleAt(boardX, boardY){ if(!bubbleParams.enabled) return; const size = Math.round(rand(bubbleParams.minSize, bubbleParams.maxSize)); const life = Math.round(rand(bubbleParams.lifeMin, bubbleParams.lifeMax)); const el = document.createElement('div'); el.className = 'bubble'; el.style.width = size + 'px'; el.style.height = size + 'px'; el.style.left = boardX + 'px'; el.style.top = boardY + 'px'; el.style.opacity = '0.98'; el.style.animation = `bubbleRise ${life}ms cubic-bezier(.2,.9,.2,1) forwards`; bubbleLayer.appendChild(el); // cleanup
+      el.addEventListener('animationend', ()=>{ try{ el.remove(); }catch(e){} }); }
+
+    function maybeSpawnBubble(ts){ if(!bubbleParams.enabled) return; if(!moving) return; if(!lastBubbleTs) lastBubbleTs = ts; if(ts - lastBubbleTs >= bubbleParams.interval){ const c = getCenterBoardLocal(); spawnBubbleAt(c.x, c.y); lastBubbleTs = ts; } }
+
+    function loop(ts){ if(gameOver) return; if(!lastTs) lastTs = ts; const dt = (ts - lastTs)/1000; lastTs = ts; computeGridBoardLocal(); if(moving){ const nextI = node.i + dir.x; const nextJ = node.j + dir.y; if(nextI < 0 || nextI > TILES_X || nextJ < 0 || nextJ > TILES_Y){ triggerGameOver('벽에 부딪혔습니다.'); return; } const target = nodeToBoardLocal(nextI,nextJ); const cur = getCenterBoardLocal(); const vx = target.x - cur.x; const vy = target.y - cur.y; const dist = Math.hypot(vx,vy); if(dist <= EPS){ node.i = nextI; node.j = nextJ; placeAtNodeBoardLocal(node.i,node.j); if(queuedDir){ const ci = node.i + queuedDir.x, cj = node.j + queuedDir.y; if(ci < 0 || ci > TILES_X || cj < 0 || cj > TILES_Y){ triggerGameOver('벽에 부딪힙니다.'); return; } applyDirection(queuedDir.x, queuedDir.y); } } else { const move = Math.min(SPEED * dt, dist); const nx = cur.x + (vx/dist)*move; const ny = cur.y + (vy/dist)*move; soup.style.left = nx.toFixed(2) + 'px'; soup.style.top = ny.toFixed(2) + 'px'; } maybeSpawnBubble(ts); } requestAnimationFrame(loop); }
+
+    // 입력 wiring (dpad + keyboard)
+    const dirMap = { 'UP':{dx:0,dy:-1,ch:'U'}, 'RIGHT':{dx:1,dy:0,ch:'R'}, 'DOWN':{dx:0,dy:1,ch:'D'}, 'LEFT':{dx:-1,dy:0,ch:'L'} };
     function setPressedImage(key){ if(dpadImg && dirMap[key]) dpadImg.src = `../asset/img/B${dirMap[key].ch}P.png`; }
     function restoreDefaultImage(){ if(dpadImg) dpadImg.src = '../asset/img/BAD.png'; }
 
-    ['up','right','down','left'].forEach(id => {
-      const btn = document.getElementById(id + '-btn');
-      const key = id.toUpperCase();
-      if(!btn) return;
-      btn.addEventListener('pointerdown', function(e){
-        e.preventDefault(); e.stopPropagation();
-        try{ btn.setPointerCapture(e.pointerId); } catch(err){}
-        setPressedImage(key);
-        const info = dirMap[key];
-        if(info) window.changeDirection(info.dx, info.dy);
-      }, { passive:false });
+    ['up','right','down','left'].forEach(id=>{ const btn = document.getElementById(id+'-btn'); const key = id.toUpperCase(); if(!btn) return; btn.addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); try{ btn.setPointerCapture(e.pointerId); }catch(_){} setPressedImage(key); const info = dirMap[key]; if(info) window.changeDirection(info.dx, info.dy); }, { passive:false }); const upHandler = e=>{ try{ btn.releasePointerCapture && btn.releasePointerCapture(e && e.pointerId); }catch(_){} restoreDefaultImage(); }; btn.addEventListener('pointerup', upHandler, { passive:false }); btn.addEventListener('pointercancel', upHandler, { passive:false }); btn.addEventListener('pointerleave', upHandler); btn.addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); const info = dirMap[key]; if(info) window.changeDirection(info.dx, info.dy); setPressedImage(key); setTimeout(restoreDefaultImage,120); }, { passive:false }); });
 
-      const upHandler = function(e){
-        try{ btn.releasePointerCapture && btn.releasePointerCapture(e && e.pointerId); }catch(err){}
-        restoreDefaultImage();
-      };
-      btn.addEventListener('pointerup', upHandler, { passive:false });
-      btn.addEventListener('pointercancel', upHandler, { passive:false });
-      btn.addEventListener('pointerleave', upHandler);
+    dpadContainer.addEventListener('pointerdown', function(e){ try{ e.preventDefault(); e.stopPropagation(); }catch(_){} const rect = dpadContainer.getBoundingClientRect(); const cx = rect.left + rect.width/2; const cy = rect.top + rect.height/2; const dx = e.clientX - cx; const dy = e.clientY - cy; const ang = Math.atan2(dy,dx) * 180/Math.PI; let key = 'RIGHT'; if(ang >= -45 && ang < 45) key='RIGHT'; else if(ang >=45 && ang <135) key='DOWN'; else if(ang >= -135 && ang < -45) key='UP'; else key='LEFT'; setPressedImage(key); const info = dirMap[key]; if(info) window.changeDirection(info.dx, info.dy); setTimeout(restoreDefaultImage,120); }, { passive:false });
 
-      btn.addEventListener('click', function(e){
-        e.preventDefault(); e.stopPropagation();
-        const info = dirMap[key];
-        if(info) window.changeDirection(info.dx, info.dy);
-        setPressedImage(key);
-        setTimeout(restoreDefaultImage, 120);
-      }, { passive:false });
+    window.addEventListener('keydown', function(e){ if(!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) return; e.preventDefault(); const mapKey = { ArrowUp:'UP', ArrowRight:'RIGHT', ArrowDown:'DOWN', ArrowLeft:'LEFT' }[e.key]; setPressedImage(mapKey); setTimeout(restoreDefaultImage,120); const info = dirMap[mapKey]; if(info) window.changeDirection(info.dx, info.dy); }, { passive:false });
+
+    // modal wiring
+    if(pauseBtn) pauseBtn.addEventListener('click', e=>{ e.preventDefault(); if(pauseModal){ pauseModal.classList.add('visible'); pauseModal.setAttribute('aria-hidden','false'); } moving=false; });
+    if(pauseClose) pauseClose.addEventListener('click', e=>{ e.preventDefault(); if(pauseModal){ pauseModal.classList.remove('visible'); pauseModal.setAttribute('aria-hidden','true'); } moving=true; requestAnimationFrame(loop); });
+    if(resumeBtn) resumeBtn.addEventListener('click', e=>{ e.preventDefault(); if(pauseModal){ pauseModal.classList.remove('visible'); pauseModal.setAttribute('aria-hidden','true'); } moving=true; requestAnimationFrame(loop); });
+    if(restartBtn) restartBtn.addEventListener('click', e=>{ e.preventDefault(); location.reload(); });
+    if(quitBtn) quitBtn.addEventListener('click', e=>{ e.preventDefault(); window.location.href = '/'; });
+
+    if(pauseModal) pauseModal.addEventListener('click', e=>{ if(e.target===pauseModal){ pauseModal.classList.remove('visible'); pauseModal.setAttribute('aria-hidden','true'); moving=true; requestAnimationFrame(loop); } });
+    if(gameOverModal) gameOverModal.addEventListener('click', e=>{ if(e.target===gameOverModal){ gameOverModal.classList.remove('visible'); gameOverModal.setAttribute('aria-hidden','true'); } });
+    if(goClose) goClose.addEventListener('click', e=>{ e.preventDefault(); if(gameOverModal){ gameOverModal.classList.remove('visible'); gameOverModal.setAttribute('aria-hidden','true'); } });
+    if(goRestart) goRestart.addEventListener('click', e=>{ e.preventDefault(); location.reload(); });
+    if(goExit) goExit.addEventListener('click', e=>{ e.preventDefault(); window.location.href = '/'; });
+
+    document.addEventListener('keydown', function(e){ if(e.key==='Escape'){ if(pauseModal && pauseModal.classList.contains('visible')){ pauseModal.classList.remove('visible'); pauseModal.setAttribute('aria-hidden','true'); moving=true; requestAnimationFrame(loop); } if(gameOverModal && gameOverModal.classList.contains('visible')){ gameOverModal.classList.remove('visible'); gameOverModal.setAttribute('aria-hidden','true'); } } });
+
+    // public helpers for debugging and bubble adjustments
+    window.__soap = window.__soap || {};
+    Object.assign(window.__soap, {
+      computeGrid: computeGridBoardLocal,
+      placeAt: placeAtNodeBoardLocal,
+      getState: ()=>({ node, dir, queuedDir, gameOver, pixelNodesX, pixelNodesY, soapOffset, bubbleParams }),
+      setSoapOffset: (x,y)=>{ soapOffset.x = x; soapOffset.y = y; placeAtNodeBoardLocal(node.i,node.j); },
+      toggleDebugNodes: (on)=>{ debugNodes = !!on; renderDebug(); },
+      setBubbleParams: (opts)=>{ Object.assign(bubbleParams, opts); },
+      toggleBubbles: (on)=>{ bubbleParams.enabled = !!on; }
     });
 
-    // container fallback: if clip-path isn't recognized on platform
-    dpadContainer.addEventListener('pointerdown', function(e){
-      try{ e.preventDefault(); e.stopPropagation(); }catch(err){}
-      const rect = dpadContainer.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      const dx = e.clientX - cx;
-      const dy = e.clientY - cy;
-      const ang = Math.atan2(dy, dx) * 180 / Math.PI;
-      let key = 'RIGHT';
-      if(ang >= -45 && ang < 45) key = 'RIGHT';
-      else if(ang >= 45 && ang < 135) key = 'DOWN';
-      else if(ang >= -135 && ang < -45) key = 'UP';
-      else key = 'LEFT';
-      setPressedImage(key);
-      const info = dirMap[key];
-      if(info) window.changeDirection(info.dx, info.dy);
-      setTimeout(restoreDefaultImage, 120);
-    }, { passive:false });
+    // start after image loaded (or timeout)
+    function start(){ computeGridBoardLocal(); node.i = Math.floor(TILES_X/2); node.j = Math.floor(TILES_Y/2); placeAtNodeBoardLocal(node.i,node.j); moving=true; lastTs=null; lastBubbleTs=0; gameOver=false; requestAnimationFrame(loop); }
+    if(sceneImg.complete) start(); else { sceneImg.addEventListener('load', start, { once:true }); setTimeout(()=>{ if(!sceneImg.complete) start(); },300); }
+    window.addEventListener('resize', ()=>{ computeGridBoardLocal(); placeAtNodeBoardLocal(node.i,node.j); });
 
-    // keyboard arrows
-    window.addEventListener('keydown', function(e){
-      if(!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) return;
-      e.preventDefault();
-      const mapKey = { ArrowUp:'UP', ArrowRight:'RIGHT', ArrowDown:'DOWN', ArrowLeft:'LEFT' }[e.key];
-      setPressedImage(mapKey);
-      setTimeout(restoreDefaultImage, 120);
-      const info = dirMap[mapKey];
-      if(info) window.changeDirection(info.dx, info.dy);
-    }, { passive:false });
-
-    /* ---------- modal wiring ---------- */
-    if(pauseBtn) pauseBtn.addEventListener('click', function(e){ e.preventDefault(); showModal(pauseModal); window.setGameRunning && window.setGameRunning(false); });
-    if(pauseClose) pauseClose.addEventListener('click', function(e){ e.preventDefault(); closeModal(pauseModal); window.setGameRunning && window.setGameRunning(true); });
-    if(resumeBtn) resumeBtn.addEventListener('click', function(e){ e.preventDefault(); closeModal(pauseModal); window.setGameRunning && window.setGameRunning(true); });
-    if(restartBtn) restartBtn.addEventListener('click', function(e){ e.preventDefault(); location.reload(); });
-    if(quitBtn) quitBtn.addEventListener('click', function(e){ e.preventDefault(); window.location.href = '/'; });
-
-    if(pauseModal) pauseModal.addEventListener('click', function(e){ if(e.target === pauseModal){ closeModal(pauseModal); window.setGameRunning && window.setGameRunning(true); }});
-    if(gameOverModal) gameOverModal.addEventListener('click', function(e){ if(e.target === gameOverModal){ closeModal(gameOverModal); }});
-    if(goClose) goClose.addEventListener('click', function(e){ e.preventDefault(); closeModal(gameOverModal); });
-
-    if(goRestart) goRestart.addEventListener('click', function(e){ e.preventDefault(); location.reload(); });
-    if(goExit) goExit.addEventListener('click', function(e){ e.preventDefault(); window.location.href = '/'; });
-
-    // Esc closes pause or gameOver
-    document.addEventListener('keydown', function(e){
-      if(e.key === 'Escape'){
-        if(pauseModal && pauseModal.classList.contains('visible')) { closeModal(pauseModal); window.setGameRunning && window.setGameRunning(true); }
-        if(gameOverModal && gameOverModal.classList.contains('visible')) { closeModal(gameOverModal); }
-      }
-    });
-
-    // ensure initial hidden
-    closeModal(pauseModal);
-    closeModal(gameOverModal);
-
-    /* ---------- safety wrappers: keep lastDir record ---------- */
-    (function(){
-      // wrap changeDirection to record lastDir (if not overridden later)
-      const original = window.changeDirection;
-      window.changeDirection = function(dx,dy){
-        try{ lastDir = { x: dx, y: dy }; }catch(e){}
-        if(typeof original === 'function') return original(dx,dy);
-        // if none, call internal applyDirection
-        return applyDirection(dx,dy);
-      };
-    })();
-
-    // ensure layout recalculation after a small delay (images may alter size)
-    setTimeout(()=>{ computeGrid(); initPosition(); }, 300);
-    // also recompute on resize
-    window.addEventListener('resize', function(){ computeGrid(); initPosition(); });
-
-    // expose debug getter
-    window.__soap_grid = {
-      getState: () => ({ grid, node, dir, queuedDir, gameOver, moving, lastDir })
-    };
-
-  }); // DOMContentLoaded end
+  });
   </script>
 </body>
 </html>

@@ -1,4 +1,3 @@
-// soap_utils_shim.js
 (function(){
   window.soapUtils = window.soapUtils || (function(){
     function isPositive(n){ return typeof n === 'number' && isFinite(n) && n > 0; }

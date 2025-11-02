@@ -1,4 +1,4 @@
-// soap_game_core.js
+// soap_game_core.js (patched - safe canvas guards + dynamic canvas creation)
 (function(){
   const U = window.soapUtils;
   const O = window.soapObstacles;
@@ -7,9 +7,78 @@
     return;
   }
 
-  const cBg = document.getElementById('bg-canvas');
-  const cBoard = document.getElementById('board-canvas');
-  const cUI = document.getElementById('ui-canvas');
+  // --- canvas references will be resolved lazily / created if missing ---
+  let cBg = null;
+  let cBoard = null;
+  let cUI = null;
+
+  // z-index mapping for dynamically created canvases
+  const CANVAS_Z = { 'bg-canvas': 2, 'board-canvas': 50, 'ui-canvas': 80 };
+
+  function refreshCanvases(){
+    // attempt to find existing canvases
+    cBg = document.getElementById('bg-canvas') || cBg;
+    cBoard = document.getElementById('board-canvas') || cBoard;
+    cUI = document.getElementById('ui-canvas') || cUI;
+
+    // get game-board container to append if needed
+    const boardEl = document.getElementById('game-board') || document.body;
+    // helper to create missing canvas
+    function ensureCanvas(id){
+      let el = document.getElementById(id);
+      if(el) return el;
+      // create and insert as absolute child of boardEl
+      el = document.createElement('canvas');
+      el.id = id;
+      el.style.position = 'absolute';
+      el.style.left = '0';
+      el.style.top = '0';
+      el.style.width = '100%';
+      el.style.height = '100%';
+      el.style.pointerEvents = 'none';
+      el.style.opacity = '1';
+      el.style.zIndex = (CANVAS_Z[id] || 1).toString();
+      // ensure smallest possible initial size
+      el.width = 2; el.height = 2;
+      // append as first child so background is below other elements
+      try{
+        boardEl.insertBefore(el, boardEl.firstChild);
+      }catch(e){
+        document.body.appendChild(el);
+      }
+      return el;
+    }
+
+    if(!cBg) cBg = ensureCanvas('bg-canvas');
+    if(!cBoard) cBoard = ensureCanvas('board-canvas');
+    if(!cUI) cUI = ensureCanvas('ui-canvas');
+  }
+
+  // safe getters
+  function getCanvasSafe(id){
+    refreshCanvases();
+    return document.getElementById(id) || null;
+  }
+  function getContextSafe(id, type){
+    const c = getCanvasSafe(id);
+    if(!c) return null;
+    try{
+      const ctx = c.getContext(type || '2d');
+      return ctx || null;
+    }catch(e){
+      console.warn('getContextSafe: failed for', id, e);
+      return null;
+    }
+  }
+
+  // small util to avoid console spam when a canvas isn't ready
+  function warnOnce(fn){
+    if(!fn.__warned){
+      fn.__warned = true;
+      console.warn.apply(console, Array.prototype.slice.call(arguments,1));
+    }
+  }
+
   let showGrid = false;
 
   const PLAYER_SPEED = 220;
@@ -24,8 +93,9 @@
   let platformRects = [];
 
   function drawBg(){
-    const ctx = cBg.getContext('2d');
-    const rect = cBg.getBoundingClientRect();
+    const ctx = getContextSafe('bg-canvas');
+    if(!ctx){ warnOnce(drawBg, 'drawBg: bg canvas/context not ready'); return; }
+    const rect = ctx.canvas.getBoundingClientRect();
     const w = rect.width, h = rect.height;
     ctx.clearRect(0,0,w,h);
     if(!U.isPositive(w) || !U.isPositive(h)) return;
@@ -209,16 +279,28 @@
   }
 
   function redrawLoop(ts){
+    // ensure canvases exist / sized
+    refreshCanvases();
+
     if(!lastTime) lastTime = ts;
     const dt = Math.min(0.05, (ts - lastTime) / 1000);
     lastTime = ts;
 
     U.fitAll();
 
-    const ctxBoard = cBoard.getContext('2d');
-    const ctxBg = cBg.getContext('2d');
-    const ctxUI = cUI.getContext('2d');
-    const rect = cBoard.getBoundingClientRect();
+    // secure contexts
+    const ctxBoard = getContextSafe('board-canvas');
+    const ctxBg = getContextSafe('bg-canvas');
+    const ctxUI = getContextSafe('ui-canvas');
+
+    if(!ctxBoard || !ctxBg || !ctxUI){
+      // if any context missing, re-schedule — they will be created/resized in refreshCanvases/fitAll
+      warnOnce(redrawLoop, 'redrawLoop: one or more canvas contexts missing; retrying');
+      requestAnimationFrame(redrawLoop);
+      return;
+    }
+
+    const rect = ctxBoard.canvas.getBoundingClientRect();
     const W = rect.width, H = rect.height;
 
     ctxBoard.clearRect(0,0,W,H);
@@ -275,6 +357,8 @@
   }
 
   window.addEventListener('load', ()=>{
+    // ensure canvases exist and are sized before starting
+    refreshCanvases();
     setupDpad();
     lastTime = null;
     U.fitAll();
