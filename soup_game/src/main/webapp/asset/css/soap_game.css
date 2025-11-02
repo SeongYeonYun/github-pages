@@ -1,58 +1,256 @@
-/* Global theme */
-:root{
-  --bg:#0f1220; --panel:#171a2b; --text:#e8ecff; --muted:#9aa3c7;
-  --border:#262b49; --grid:#2a315c; --grid2:#3f4678;
-}
-html,body{height:100%; overflow-x:hidden}
-body{
-  margin:0; background:radial-gradient(1200px 800px at 70% 10%, #141935 0%, #0f1220 60%);
-  color:var(--text); font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto;
-  display:grid; place-items:center; padding:16px; box-sizing:border-box;
-}
-.wrap{ display:grid; gap:14px; width:min(1200px,100%); grid-template-columns: 1fr; }
-@media (min-width:1024px){ .wrap{ grid-template-columns: minmax(640px, 1fr) 360px; } }
-@media (min-width:1280px){ .wrap{ grid-template-columns: 960px 360px; } }
+/* soap_game.css - 일시정지 버튼 위치 수정 버전 */
 
-.panel{ background:linear-gradient(180deg,rgba(255,255,255,0.03),transparent 60%), var(--panel);
-  border:1px solid var(--border); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.35); }
-.game-panel{ position:relative; padding:14px; display:grid; gap:10px; grid-template-rows:auto 1fr auto; }
-.hud{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; align-items:center; font-size:14px; color:var(--muted); }
-.hud strong{ color:var(--text) }
-.pending-chip{ justify-self:end; background:#202651; border:1px solid #2d3467; color:#bcd0ff;
-  padding:6px 10px; border-radius:999px; font-size:12px; display:inline-flex; gap:6px; align-items:center; }
-
-canvas{
-  width:100%; height:auto; aspect-ratio: 9 / 7; display:block;
-  background:linear-gradient(180deg,rgba(255,255,255,.04),transparent 40%), #0e1021;
-  border-radius:12px; border:1px solid #23284a; touch-action:none;
+/* 기본 리셋 */
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; padding: 0; -webkit-font-smoothing:antialiased; }
+body {
+    font-family:  "Noto Sans KR";
+    color: #052b2f;
+    /* 폴백 그라디언트 (이미지 로드 실패시) */
+    background: linear-gradient(150deg, #cfeffd 0%, #8fd8f4 18%, #6fbff5 55%, #4095f5 100%);
 }
 
-.controls{ display:grid; gap:10px; grid-template-columns:1fr 1fr 1fr; }
-.btn{ font-size:16px; background:#1f2442; color:#e5ecff; border:1px solid #2c3158;
-  border-radius:12px; padding:12px 14px; cursor:pointer; user-select:none; transition:transform .05s ease, background .2s ease, border-color .2s ease; }
-.btn:hover{ background:#262c52 } .btn:active{ transform:translateY(1px) scale(.99) }
-.btn.primary{ background:#234a63; border-color:#2d6f87 } .btn.primary:hover{ background:#27607e }
-.btn.success{ background:#204f34; border-color:#2b7f53 }
+/* 게임 루트: 뷰포트 전체, 여기에 이미지 적용 */
+#game-root {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column; 
+    justify-content: flex-start;
+    z-index: 0;
 
-.side-panel{ padding:12px; display:grid; gap:12px }
-.section{ background:#12152b; border:1px solid #242a4c; border-radius:12px; padding:12px }
-.section h3{ margin:0 0 8px 0; font-size:15px; color:#cfe5ff }
-.kv{ display:grid; grid-template-columns:110px 1fr; gap:6px; font-size:14px; color:#b7c0e6 }
-.kv b{ color:#eef3ff }
-table{ width:100%; border-collapse:collapse; font-size:13px }
-th,td{ padding:8px 10px; border-bottom:1px solid #242a4c; text-align:left }
-th{ color:#cfe5ff; font-weight:600; background:#151830; position:sticky; top:0 }
-tbody tr:hover{ background:rgba(255,255,255,.03) }
-.tag{ font-size:11px; padding:2px 6px; border-radius:6px; border:1px solid #335b66; color:#bcefff; background:#173740 }
-.tag.fail{ color:#ffc3c3; border-color:#66333a; background:#40171d }
-.hint{ font-size:12px; color:var(--muted); line-height:1.45 }
-.log{ background:#0e1021; border:1px solid #23284a; border-radius:8px; padding:8px;
-  max-height: clamp(120px, 24vh, 220px); overflow:auto;
-  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; color:#cfe5ff; line-height:1.35; white-space:pre-wrap; }
+    /* --- 실제 배경 이미지: 프로젝트에 맞게 파일을 넣어주세요 --- */
+    background-image: url('../asset/img/scene_bg.png');
+    background-repeat: no-repeat;
+    background-position: center top;
+    background-size: cover;
+}
 
-@media (max-width:600px){
-  .hud{ grid-template-columns:1fr 1fr; row-gap:6px }
-  .controls{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .btn{ padding:10px 12px; font-size:16px; border-radius:14px }
-  .kv{ grid-template-columns:1fr }
+/* ---------- Header Area (타이머와 버튼을 감싸는 영역) ---------- */
+#header-area {
+    position: relative;
+    width: 100%; /* 가로 꽉 채우기 */
+    height: 50px;
+    margin-bottom: 12px;
+    padding: 0 12px; 
+}
+
+/*-----------일시정지 버튼---------------------*/
+#pauseBtn {
+    position: absolute;
+    /* ⭐ 수정: left 대신 right 배치 ⭐ */
+    right: 12px;
+    top: 12px;
+    z-index: 1000;
+    
+    background: transparent; 
+    border: none;
+    border-radius: 8px;
+    padding: 0;
+    cursor: pointer;
+    width: 38px;
+    height: 38px;
+}
+
+/*  일시정지 버튼 내부 이미지 스타일 */
+#pauseBtn .icon-img {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* ---------- Timer bar (horizontal, water-fill with waves) ---------- */
+#timer {
+    position: absolute;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(420px, 80%);
+    height: 22px;
+    border-radius: 24px;
+    padding: 3px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.16), rgba(0,0,0,0.03));
+    box-shadow: 0 2px 6px rgba(0,0,0,0.18) inset, 0 2px 8px rgba(0,0,0,0.08);
+    z-index: 200;
+    overflow: hidden;
+}
+
+/* 물결 애니메이션 키프레임 (물결 모양을 유지하기 위해) */
+@keyframes waveMove {
+    0% { transform: translate3d(0, 0, 0); }
+    100% { transform: translate3d(-50%, 0, 0); }
+}
+
+/* 타이머 채움 막대 */
+#timer .fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%; 
+    height: 100%;
+    border-radius: 20px;
+    background: #00bcd4;
+    overflow: hidden;
+    transition: width 0.3s ease-out;
+}
+
+/* 타이머 물결 효과 */
+#timer .wave {
+    position: absolute;
+    width: 200%;
+    height: 200%;
+    top: 50%;
+    left: 50%;
+    margin-left: -100%;
+    margin-top: -100%;
+    background-color: rgba(255, 255, 255, 0.4);
+    border-radius: 40%;
+    transform-origin: 50% 50%;
+    animation: waveMove 3s linear infinite;
+    z-index: 10;
+}
+
+#timer .wave1 {
+    opacity: 0.6;
+    animation-duration: 4s;
+}
+
+/* responsive tweaks */
+@media (max-width:420px){
+    /* 작은 화면 패딩 조정 */
+    #header-area { height: 36px; margin-bottom: 8px; padding: 0 8px; }
+    /* ⭐ 수정: left 대신 right 배치 ⭐ */
+    #pauseBtn { top: 8px; right: 8px; left: auto; width: 30px; height: 30px; }
+
+    #timer { top: 8px; height: 14px; padding:2px; }
+    #timer .fill { border-radius: 16px; }
+    
+    /* 작은 화면에서 #game-board 패딩 제거 (가로 꽉 채우기) */
+    #game-board { padding: 0; }
+}
+
+
+/* 장면(가운데 채우기) */
+#game-board {
+    position: relative;
+    width: 100%; 
+    flex: 1 1 auto;
+    aspect-ratio: 1/1; 
+    padding: 0; 
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+
+/* ------------------------- */
+/* ⭐ 3. 방향키 오버레이 스타일 (유지) ⭐ */
+/* ------------------------- */
+
+/* 🧭 방향키 컨테이너 */
+#direction-buttons {
+    position: absolute;
+    bottom: 5%; 
+    left: 50%;
+    transform: translateX(-50%); 
+    width: 200px; 
+    height: 200px;
+    z-index: 220;
+}
+
+/*  기본 방향키 이미지 (BAD.png) */
+#dpad-img {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 10; 
+    user-select: none;
+    pointer-events: none; /* 클릭을 버튼에 위임 */
+}
+
+/*  투명한 클릭 영역 버튼 */
+#direction-buttons button {
+    position: absolute;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    z-index: 20; 
+    opacity: 0; /* 투명하게 설정 */
+    -webkit-tap-highlight-color: transparent; /* 모바일 탭 하이라이트 제거 */
+}
+
+/* 각 방향 버튼 위치 및 모양 설정 (clip-path 유지) */
+#up-btn {
+    width: 100px; height: 100px; top: 0; left: 50%; transform: translateX(-50%);
+    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+}
+
+#down-btn {
+    width: 100px; height: 100px; bottom: 0; left: 50%; transform: translateX(-50%);
+    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+}
+
+#left-btn {
+    width: 100px; height: 100px; top: 50%; left: 0; transform: translateY(-50%);
+    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+}
+
+#right-btn {
+    width: 100px; height: 100px; top: 50%; right: 0; transform: translateY(-50%);
+    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+}
+
+
+/* ------------------------- */
+/* 4. 마우스 오버 시 이미지 교체 효과 (모두 제거됨) */
+/* ------------------------- */
+/* JavaScript가 이 기능을 담당합니다. */
+
+
+/* ---------- Modal / Pop-up Window (일시정지 화면) ---------- */
+
+/* 모달 컨테이너: 화면 전체를 덮는 오버레이 역할 */
+#myModal {
+    position: fixed;
+    z-index: 10000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    
+    /* 수평 및 수직 중앙 정렬을 위한 Flexbox 적용 */
+    display: flex; 
+    align-items: center; /* 수직 중앙 정렬 */
+    justify-content: center; /* 수평 중앙 정렬 */
+    
+    overflow: auto; 
+    background-color: rgba(0, 0, 0, 0.6); 
+}
+
+/* 모달 콘텐츠 박스: 일시정지 내용이 들어가는 영역 */
+#myModal .modal-content {
+    position: relative; 
+    background-color: #fefefe;
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    
+    /* 애니메이션 효과 */
+    opacity: 0;
+    transform: translateY(-50px);
+    transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+}
+
+/* 모달이 활성화될 때 (JS에서 display:flex; 설정) */
+#myModal[aria-hidden="false"] {
+    display: flex; /* Flexbox로 표시 */
+}
+
+/* 모달이 표시된 후 콘텐츠 애니메이션 */
+#myModal[aria-hidden="false"] .modal-content {
+    opacity: 1;
+    transform: translateY(0);
 }

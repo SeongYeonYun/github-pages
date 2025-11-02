@@ -1,7 +1,5 @@
-/* ========== soap_utils.js ========== */
 (function(){
   'use strict';
-  // Helpers
   const U = {
     randInt(min,max){ return Math.floor(Math.random()*(max-min+1))+min; },
     now(){ return performance.now(); },
@@ -12,7 +10,6 @@
   };
   window.U = U;
 
-  // Elements
   const canvas = document.getElementById('gameCanvas');
   const ctx = canvas.getContext('2d');
   const stageLabel = document.getElementById('stageLabel');
@@ -28,7 +25,6 @@
 
   window.El = { canvas, ctx, stageLabel, timeLabel, windowLabel, pendingDirEl, btnLeft, btnRight, btnStart, leaderboardBody, logBox, btnClearLog };
 
-  // Log
   const LOG=[];
   function logEvent(type, detail=''){
     const running = G.running && G.startMs>0;
@@ -39,12 +35,9 @@
   }
   window.logEvent = logEvent;
 
-  // Config
   const CONFIG = JSON.parse(document.getElementById('stage-config').textContent);
   window.CONFIG = CONFIG;
   const WARN_BEFORE_MS = 5000; window.WARN_BEFORE_MS = WARN_BEFORE_MS;
-
-  // Game State
   const DIRS=[{x:1,y:0},{x:0,y:1},{x:-1,y:0},{x:0,y:-1}];
   window.DIRS = DIRS;
   const BASIN_FALL_MS = 600; window.BASIN_FALL_MS = BASIN_FALL_MS;
@@ -61,7 +54,6 @@
   };
   window.G = G;
 
-  // Resize
   const ASPECT_W = 9, ASPECT_H = 7;
   function resizeCanvas(){
     const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
@@ -80,7 +72,6 @@
   window.addEventListener('orientationchange', ()=>setTimeout(resizeCanvas, 50));
   window.resizeCanvas = resizeCanvas;
 
-  // Coordinates
   function nodeToXY(n){
     const usableW = canvas.width - G.margin*2;
     const usableH = canvas.height - G.margin*2;
@@ -101,13 +92,28 @@
   }
   window.edgeId = edgeId;
 
-  // Input
+  function playfieldRect(){
+    const usableW = canvas.width - G.margin*2;
+    const usableH = canvas.height - G.margin*2;
+    return { x: G.margin, y: G.margin, w: usableW, h: usableH };
+  }
+  window.playfieldRect = playfieldRect;
+
+  // === Field Background Image ===
+  const FieldBG = { img: null, loaded: false, fit: CONFIG.fieldImageFit || 'cover' };
+  if (CONFIG.fieldImageUrl) {
+    const img = new Image();
+    img.onload = ()=>{ FieldBG.loaded = true; window.draw && window.draw(); };
+    img.src = CONFIG.fieldImageUrl;
+    FieldBG.img = img;
+  }
+  window.FieldBG = FieldBG;
+
   function reserveTurn(dir){ G.pendingTurn=dir; updatePendingLabel(); logEvent('INPUT', dir==='L'?'LEFT':'RIGHT'); }
   window.reserveTurn = reserveTurn;
   function updatePendingLabel(){ El.pendingDirEl.textContent = ({L:'왼쪽', R:'오른쪽'})[G.pendingTurn] ?? '직진'; }
   window.updatePendingLabel = updatePendingLabel;
 
-  // Leaderboard
   const LEADER_KEY='soap_escape_leaderboard_v1';
   function saveToLeaderboard(rec){
     const list=U.loadJSON(LEADER_KEY,[]);
@@ -140,7 +146,6 @@
   function escapeHtml(s){ return s.replace(/[&<>\"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m])); }
   window.escapeHtml = escapeHtml;
 
-  // Expose UI labels
   window.updateHUD = function updateHUD(){
     El.stageLabel.textContent = `${G.stageIndex+1} / 5`;
     El.timeLabel.textContent = U.fmtTime(G.elapsedMs);
@@ -148,7 +153,6 @@
     El.windowLabel.textContent = G.window.opened ? '열림!' : `닫힘 (${U.fmtTime(remain)} 후 오픈)`;
   };
 
-  // Buttons & key bindings
   El.btnLeft.addEventListener('click', ()=>reserveTurn('L'));
   El.btnRight.addEventListener('click', ()=>reserveTurn('R'));
   El.btnStart.addEventListener('click', ()=>{ if(G.running) window.endGame('fail','중지 버튼으로 게임을 종료했습니다.'); else window.startGame(); });
@@ -158,7 +162,6 @@
     else if(e.key===' '){ e.preventDefault(); if(!G.running) window.startGame(); }
   });
 
-  // Init hook
   window.addEventListener('DOMContentLoaded', ()=>{
     resizeCanvas();
     renderLeaderboard();

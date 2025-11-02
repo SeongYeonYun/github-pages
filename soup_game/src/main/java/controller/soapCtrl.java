@@ -24,17 +24,18 @@ public class soapCtrl extends HttpServlet {
 	protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
 		
 		System.out.println("get");
-		response.sendRedirect(request.getContextPath() + "/html/soap_game_index.html");
+//		response.sendRedirect(request.getContextPath() + "/html/soap_game_index.html");
+		response.sendRedirect(request.getContextPath() + "/html/game_main.html");
 		
 //		String ip = request.getRemoteAddr();
-//		System.out.println("Á¢¼ÓÇÑ Å¬¶óÀÌ¾ðÆ® IP: " + ip);
+
 	}
 
 
 	protected void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
 		
 		
-		RequestDispatcher rd = request.getRequestDispatcher("/html/soap_game_index.html");
+		RequestDispatcher rd = request.getRequestDispatcher("/html/game_main.html");
 		rd.forward(request, response);
 
 		
@@ -42,7 +43,7 @@ public class soapCtrl extends HttpServlet {
 		
 		
 		String ip = request.getRemoteAddr();
-		System.out.println("Á¢¼ÓÇÑ Å¬¶óÀÌ¾ðÆ® IP: " + ip);
+		System.out.println("ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Å¬ï¿½ï¿½ï¿½Ì¾ï¿½Æ® IP: " + ip);
 		
 	}
 

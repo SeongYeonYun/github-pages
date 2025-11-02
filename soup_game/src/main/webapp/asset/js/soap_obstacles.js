@@ -1,151 +1,92 @@
-/* ========== soap_obstacles.js ========== */
-(function(){
-  'use strict';
-  const { U, G, DIRS, BASIN_FALL_MS, edgeId, nodeToXY, El } = window;
+// soap_obstacles.js
+(function(window){
+  const U = window.soapUtils;
+  if(!U) { console.warn('soapObstacles: soapUtils missing - aborting obstacle helper load.'); return; }
 
-  function trySpawnObstacle(){
-    const st = CONFIG.stages[G.stageIndex], now = U.now();
-    // purge expired
-    G.obstacles = G.obstacles.filter(o => o.until > now);
-
-    if (now < G.graceUntil || G.obstacles.length >= st.maxObstacles || now < G.nextSpawnAt) return;
-
-    // collect possible edges
-    const edges = []; const max = G.gridNodes - 1;
-    for (let y = 0; y <= max; y++) {
-      for (let x = 0; x <= max; x++) {
-        if (x < max) edges.push({ a: { x: x, y: y }, b: { x: x + 1, y: y } });
-        if (y < max) edges.push({ a: { x: x, y: y }, b: { x: x,     y: y + 1 } });
-      }
-    }
-
-    // exclude edges adjacent to the window node
-    const safeEdges = edges.filter(e =>
-      !((e.a.x===G.window.x && e.a.y===G.window.y) || (e.b.x===G.window.x && e.b.y===G.window.y))
-    );
-
-    // exclude current moving edge (warning can show elsewhere)
-    const currentId = edgeId(G.nodeA, G.nodeB);
-    const pool = safeEdges.filter(e => edgeId(e.a, e.b) !== currentId);
-    if (!pool.length) { G.nextSpawnAt = now + 200; return; }
-
-    const pick = pool[U.randInt(0, pool.length - 1)];
-    const id = edgeId(pick.a, pick.b);
-    if (G.obstacles.some(o => o.id === id && o.until > now)) { G.nextSpawnAt = now + 150; return; }
-
-    // center in screen coords
-    const a = nodeToXY(pick.a), b = nodeToXY(pick.b);
-    const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-
-    const WARNING_MS = 2000;
-    const dropAt = now + WARNING_MS;
-    const landAt = dropAt + BASIN_FALL_MS;
-
-    G.obstacles.push({
-      id: id,
-      a: pick.a, b: pick.b,
-      center: center,
-      spawn: now,
-      warnFrom: now,
-      dropAt: dropAt,
-      landAt: landAt,
-      until: now + st.obstacleLifetimeMs + WARNING_MS + BASIN_FALL_MS,
-      state: 'warning'
-    });
-
-    G.nextSpawnAt = now + st.obstacleSpawnIntervalMs;
+  function drawRoundedBar(ctx,x,y,w,thickness,color){
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.2)';
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetY = 2;
+    const r = thickness;
+    U.roundRectFill(ctx, x, y, w, thickness, r, color);
+    ctx.restore();
   }
-  window.trySpawnObstacle = trySpawnObstacle;
 
-  function drawObstacles(){
-    const now = U.now();
-    // purge expired
-    G.obstacles = G.obstacles.filter(o => o.until > now);
-
-    const usableH = El.canvas.height - G.margin*2;
-    const stepY = usableH/(G.gridNodes-1);
-    const radius = stepY * 0.18; // smaller so it doesn't block other lanes
-
-    for (const o of G.obstacles){
-      // advance state
-      if (o.state === 'warning' && now >= o.dropAt) o.state = 'falling';
-      if (o.state === 'falling' && now >= o.landAt) o.state = 'landed';
-
-      // warning indicator
-      if (o.state === 'warning'){
-        const t = Math.max(0, Math.min(1, (now - o.warnFrom) / 2000));
-        const pulse = 1 + 0.2 * Math.sin(t * 10);
-        El.ctx.save();
-        El.ctx.translate(o.center.x, o.center.y);
-        El.ctx.globalAlpha = 0.85;
-        El.ctx.lineWidth = 3;
-        El.ctx.strokeStyle = '#ff4d4d';
-        El.ctx.beginPath();
-        El.ctx.arc(0, 0, radius * 1.2 * pulse, 0, Math.PI*2);
-        El.ctx.stroke();
-        El.ctx.globalAlpha = 0.25;
-        El.ctx.fillStyle = '#ff4d4d';
-        El.ctx.beginPath();
-        El.ctx.arc(0, 0, radius * 0.9, 0, Math.PI*2);
-        El.ctx.fill();
-        El.ctx.restore();
-        continue;
-      }
-
-      let offsetY = 0;
-      if (o.state === 'falling'){
-        const t = Math.min(1, (now - o.dropAt) / BASIN_FALL_MS);
-        const fallDist = stepY * 0.8;
-        offsetY = -fallDist * (1 - t);
-      }
-
-      El.ctx.save();
-      El.ctx.translate(o.center.x, o.center.y + offsetY);
-
-      // shadow
-      const shadowY = 6 + Math.max(0, -offsetY*0.08);
-      El.ctx.save();
-      El.ctx.globalAlpha = 0.22;
-      El.ctx.beginPath();
-      El.ctx.ellipse(6, shadowY, radius*0.75, radius*0.40, 0, 0, Math.PI*2);
-      El.ctx.fillStyle = '#000';
-      El.ctx.fill();
-      El.ctx.restore();
-
-      // basin body
-      const rim = Math.max(2, radius*0.16);
-      El.ctx.beginPath(); El.ctx.arc(0,0, radius, 0, Math.PI*2);
-      El.ctx.fillStyle = '#ffffff'; El.ctx.fill();
-      El.ctx.lineWidth = rim; El.ctx.strokeStyle = '#dfe6ff'; El.ctx.stroke();
-
-      // inner ellipse
-      El.ctx.beginPath(); El.ctx.ellipse(0, 0, radius*0.8, radius*0.5, 0, 0, Math.PI*2);
-      El.ctx.strokeStyle = 'rgba(180,200,255,0.8)';
-      El.ctx.lineWidth = 1.2; El.ctx.stroke();
-
-      El.ctx.restore();
-    }
+  function drawDoubleLine(ctx, x, y, w, thickness){
+    drawRoundedBar(ctx, x, y, w, thickness, '#04363a');
+    drawRoundedBar(ctx, x, y + Math.max(8, thickness*1.2), w*0.95, thickness, '#04363a');
   }
-  window.drawObstacles = drawObstacles;
 
-  function checkBasinCollision(){
-    if(!G.running) return;
-    const now = U.now();
-    const pos = window.soapPos();
-    const usableH = El.canvas.height - G.margin*2;
-    const stepY = usableH/(G.gridNodes-1);
-    const r = (stepY/2) / 2;
+  function drawLowerPlatforms(ctx, canvasW, canvasH, boardArea){
+    const rects = [];
+    const px = Math.max(12, canvasW * 0.06);
+    const platformW = Math.max(80, canvasW * 0.36);
+    const leftX = px;
+    const rightX = canvasW - platformW - px;
+    const top = boardArea.y + boardArea.size + canvasH*0.06;
 
-    for(const o of G.obstacles){
-      if(o.until <= now) continue;
-      if(o.state !== 'landed') continue;
-      const dx = pos.x - o.center.x, dy = pos.y - o.center.y;
-      if(Math.hypot(dx,dy) <= r){
-        logEvent('CRASH','세숫대야 충돌');
-        window.endGame('fail','세숫대야 충돌');
-        return;
-      }
-    }
+    const t1 = {x:leftX, y: top, w: platformW, h: 10};
+    drawDoubleLine(ctx, t1.x, t1.y, t1.w, t1.h); rects.push(t1);
+
+    const t2 = {x:leftX, y: top + 24, w: platformW * 0.9, h: 10};
+    drawDoubleLine(ctx, t2.x, t2.y, t2.w, t2.h); rects.push(t2);
+
+    const t3 = {x:rightX, y: top + 6, w: platformW, h: 10};
+    drawDoubleLine(ctx, t3.x, t3.y, t3.w, t3.h); rects.push(t3);
+
+    const t4 = {x:rightX, y: top + 30, w: platformW * 0.9, h: 10};
+    drawDoubleLine(ctx, t4.x, t4.y, t4.w, t4.h); rects.push(t4);
+
+    return rects;
   }
-  window.checkBasinCollision = checkBasinCollision;
-})();
+
+  function drawRotatedBox(ctx, cx, cy, w, h, angle, color){
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    ctx.fillStyle = color;
+    U.roundRectPath(ctx, -w/2, -h/2, w, h, Math.min(w,h)*0.08);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    U.roundRectPath(ctx, -w/2 + 3, -h/2 + 3, w - 6, h/2 - 4, Math.min(w,h)*0.06);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    U.roundRectPath(ctx, -w/2 + 2, h/2 - (h*0.2), w - 4, h*0.2, 4);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+    ctx.fillRect(-w/2 + 6, -h/8, w - 12, Math.max(2, h*0.07));
+    ctx.restore();
+  }
+
+  function drawPuckWithHandle(ctx, cx, cy, radius, color, innerColor){
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.beginPath(); ctx.ellipse(cx+3, cy+6, radius*1.05, radius*0.6, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx, cy, radius, radius, 0, 0, Math.PI*2); ctx.fillStyle = '#0f7881'; ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx, cy, radius*0.58, radius*0.58, 0, 0, Math.PI*2); ctx.fillStyle = innerColor; ctx.fill();
+    const hx = cx + radius + 6;
+    const hy = cy - 4;
+    U.roundRectFill(ctx, hx, hy, radius*0.65, Math.max(6, radius*0.45), 4, '#6ed3c6');
+    ctx.strokeStyle = 'rgba(0,0,0,0.06)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx + radius*0.55, cy - 2); ctx.lineTo(hx + 2, hy + 3); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawObjects(ctx, checker){
+    const {innerX, innerY, innerSize, tw, th} = checker;
+    const boxCenterX = innerX + tw * 1.1;
+    const boxCenterY = innerY + th * 0.9;
+    drawRotatedBox(ctx, boxCenterX, boxCenterY, tw*0.9, th*0.6, -18 * Math.PI/180, '#f58a2c');
+
+    const puckX = innerX + tw*2.4;
+    const puckY = innerY + th * 1.1;
+    drawPuckWithHandle(ctx, puckX, puckY, Math.min(tw, th)*0.38, '#2ea3b6', '#a6f0ee');
+  }
+
+  window.soapObstacles = {
+    drawLowerPlatforms, drawObjects,
+    drawDoubleLine, drawRoundedBar, drawRotatedBox, drawPuckWithHandle
+  };
+})(window);

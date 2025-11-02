@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>모바일 웹 게임 셸</title>
+  <meta name="theme-color" content="#111111" />
+  <style>
+    :root{
+      --bg0:#0b0f1a;
+      --bg1:#111a2e;
+
+      /* 버튼 색상 (사용자 요청) */
+      --btn-main: #b1e4ed;      /* 메인 색상(앞면) */
+      --btn-main-dark: #1b6da9; /* 뒤 레이어(그림자) */
+      --btn-main-border: #1a5f8f;
+      --btn-main-shadow: rgba(36,151,216,0.25);
+
+      --accent: var(--btn-main);
+      --accent-2: var(--btn-main-dark);
+
+      --text:#f5f7ff;
+      --muted:#a8b0c8;
+      --danger:#ff6b6b;
+      --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+      --bar-offset: 24px;
+
+      /* 기존 pink 팔레트는 보존(learn-more에 의해 사용되는 경우가 있으면 안건드림) */
+      --pm-text: #382b22;
+      --pm-light-pink: #fff0f0;
+      --pm-pink: #ffe9e9;
+      --pm-dark-pink: #f9c4d2;
+      --pm-pink-border: #b18597;
+      --pm-pink-shadow: #ffe3e2;
+    }
+
+    *{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+    html,body{height:100%; margin:0; background:linear-gradient(180deg,var(--bg0),var(--bg1)); color:var(--text); font-family:Noto Sans KR, sans-serif;}
+    .screen{position:fixed; inset:0; display:none;}
+    .screen.active{display:block;}
+    .center{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; padding:24px;}
+
+    /* splash */
+    .splash-wrap{position:relative; width:100%; height:100%; background:#000;}
+    .splash-video{position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#000;}
+    .splash-overlay{position:absolute; inset:auto 0 0 0; padding:16px 16px calc(16px + var(--safe-area-bottom)); display:flex; justify-content:center; background:linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,.5) 45%, rgba(0,0,0,.7));}
+
+    /* lobby */
+    .title{font-weight:900; text-align:center; line-height:1.1; font-size:clamp(22px, 7vw, 34px);}
+    .subtitle{margin-top:8px; color:var(--muted); text-align:center}
+
+    .bottom-bar{position:fixed; left:0; right:0; bottom: calc(var(--bar-offset)); padding:12px 16px calc(12px + var(--safe-area-bottom)); background:linear-gradient(180deg, rgba(10,12,20,0), rgba(10,12,20,.85) 40%, rgba(10,12,20,.95)); display:flex; flex-direction:column; gap:10px; backdrop-filter: blur(10px);}
+    .btn{appearance:none; border:0; border-radius:14px; padding:16px; font-size:16px; font-weight:800; width:100%; overflow:visible; cursor:pointer; transition:transform 140ms ease, box-shadow 140ms ease;}
+    /* primary 버튼(그라디언트 대신 메인색 + 3D 유지) */
+    .btn-primary{
+      background: linear-gradient(135deg, var(--btn-main), var(--btn-main-dark));
+      color:#ffffff;
+      box-shadow:0 10px 24px var(--btn-main-shadow);
+      border: 0;
+    }
+
+    /* learn-more 3D 스타일 — 색상만 blue 계열로 변경 */
+    .btn.learn-more,
+    .splash-cta.learn-more,
+    .btn-close.learn-more {
+      position: relative;
+      display: inline-block;
+      cursor: pointer;
+      outline: none;
+      border: 0;
+      vertical-align: middle;
+      text-decoration: none;
+      font-size: inherit;
+      font-family: 'Rubik', sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      box-sizing: border-box;
+      z-index: 1;
+      /* 기본 앞면 색상을 메인으로 */
+      color: #fff;
+      background: var(--btn-main);
+      border-radius: 0.75em;
+    }
+
+    .btn.learn-more {
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 1.25em 2em;
+      border: 2px solid var(--btn-main-border);
+      transform-style: preserve-3d;
+      transition: transform 150ms cubic-bezier(0, 0, 0.58, 1), background 150ms cubic-bezier(0, 0, 0.58, 1);
+    }
+
+
+
+	
+    /* pseudo 레이어 (뒤쪽 레이어: 어두운 파란색 + 입체감 그림자) */
+    .btn.learn-more::before,
+    .splash-cta.learn-more::before,
+    .btn-close.learn-more::before {
+      position: absolute;
+      content: '';
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: var(--btn-main-dark);
+      border-radius: inherit;
+      box-shadow: 0 0 0 2px var(--btn-main-border), 0 0.625em 0 0 var(--btn-main-shadow);
+      transform: translate3d(0, 0.75em, -1em);
+      transition: transform 150ms cubic-bezier(0, 0, 0.58, 1), box-shadow 150ms cubic-bezier(0, 0, 0.58, 1);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .btn.learn-more:hover {
+      background: var(--btn-main);
+      transform: translate(0, 0.25em);
+    }
+    .btn.learn-more:hover::before {
+      box-shadow: 0 0 0 2px var(--btn-main-border), 0 0.5em 0 0 var(--btn-main-shadow);
+      transform: translate3d(0, 0.5em, -1em);
+    }
+
+    .btn.learn-more:active {
+      background: var(--btn-main);
+      transform: translate(0em, 0.75em);
+    }
+    .btn.learn-more:active::before {
+      box-shadow: 0 0 0 2px var(--btn-main-border), 0 0 var(--btn-main-shadow);
+      transform: translate3d(0, 0, -1em);
+    }
+
+    /* learn-more full width helper */
+    .btn.learn-more.full { width:80%;
+     display:inline-block;
+     margin-left : 10%;
+     margin-top : 15px;
+      }
+
+    /* ghost 버튼 스타일은 유지 */
+    .btn-ghost{background:rgba(255,255,255,.06); color:#e8edff; border:1px solid rgba(255,255,255,.09);}
+
+    /* waiting */
+    .waiting{position:fixed; inset:0; display:none; align-items:center; justify-content:center; flex-direction:column; text-align:center; padding:24px;}
+    .waiting.active{display:flex;}
+    .waiting-bg{position:absolute; inset:0; overflow:hidden; pointer-events:none;}
+    .waiting-bg img{width:100%; height:100%; object-fit:cover; display:block; filter:brightness(.9);}
+    .waiting-dim{position:absolute; inset:0; background:rgba(6,8,12,.65); backdrop-filter: blur(6px);}
+    .waiting-card{position:relative; z-index:1; display:flex; flex-direction:column; align-items:center; background:rgba(13,19,34,.6); border:1px solid rgba(255,255,255,.08); border-radius:16px; padding:18px 20px; max-width:min(92vw, 420px); box-shadow:0 10px 40px rgba(0,0,0,.35);}
+    .spinner{width:64px; height:64px; border-radius:50%; border:6px solid rgba(255,255,255,.12); border-top-color:var(--accent); animation:spin 1s linear infinite; margin-bottom:14px;}
+    @keyframes spin {to{transform:rotate(360deg)}}
+    .dots::after{content:""; animation:dots 1.2s steps(4,end) infinite;}
+    @keyframes dots{0%{content:""} 25%{content:"."} 50%{content:".."} 75%{content:"..."} 100%{content:""}}
+    .waiting-actions{margin-top:14px; display:flex; gap:10px; width:100%;}
+    .btn-danger{background:rgba(255,107,107,.12); color:#ffd2d2; border:1px solid rgba(255,107,107,.35);}
+
+    /* howto */
+    .howto{position:fixed; inset:0; z-index:100; background:rgba(0,0,0,0.9); display:none; justify-content:center; align-items:center;}
+    .howto-inner{position:relative; max-width:100%; max-height:100%;}
+    .howto img{max-width:100%; max-height:100%; object-fit:contain; display:block;}
+    .howto .btn-close{position:fixed; top:16px; right:16px; background:rgba(0,0,0,0.6); color:#fff; border:0; width:40px; height:40px; border-radius:50%; font-size:20px; font-weight:bold; line-height:1; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:101;}
+    .howto .btn-close:hover{ background:rgba(255,255,255,0.2); }
+
+    @media (prefers-reduced-motion: reduce){
+      .spinner{animation:none; border-top-color:rgba(255,255,255,.7)}
+    }
+  </style>
+</head>
+<body>
+
+  <!-- SPLASH -->
+  <section id="splash" class="screen active" aria-label="팀 로고">
+    <div class="splash-wrap" id="splashWrap">
+      <video id="splashVideo" class="splash-video" preload="auto" playsinline webkit-playsinline muted>
+        <source src="../asset/mvi/logo_animation_1.mp4" type="video/mp4" />
+        브라우저가 영상을 지원하지 않습니다.
+      </video>
+      <div class="splash-overlay"></div>
+    </div>
+  </section>
+
+  <!-- LOBBY -->
+  <section id="lobby" class="screen" aria-label="게임 로비">
+    <div class="center" style="padding-bottom:140px">
+      <h1 class="title" aria-live="polite">PROJECT TITLE</h1>
+      <p class="subtitle">아래 버튼으로 시작하거나, 방법을 확인하세요.</p>
+    </div>
+    <nav class="bottom-bar" role="navigation" aria-label="하단 메뉴">
+      <a href = "soap_game_index.html"><button id="btnStart" class="btn btn-primary learn-more full">게임 시작</button></a>
+      <button id="btnHowTo" class="btn btn-ghost learn-more full">게임 방법</button>
+    </nav>
+  </section>
+
+  <!-- WAITING -->
+  <div id="waiting" class="waiting" role="dialog" aria-modal="true" aria-labelledby="waitTitle">
+    <div class="waiting-bg" aria-hidden="true">
+      <img id="waitingBg" src="assets/waiting-bg.png" alt="" />
+      <div class="waiting-dim"></div>
+    </div>
+    <div class="waiting-card">
+      <div class="spinner" aria-hidden="true"></div>
+      <h2 id="waitTitle" style="margin:0">게임 준비 중<span class="dots"></span></h2>
+      <p class="subtitle" style="margin-top:6px">리소스 로딩 및 룸 연결을 진행합니다.</p>
+      <div class="waiting-actions">
+        <button id="btnCancel" class="btn btn-danger learn-more">취소</button>
+        <button id="btnForceStart" class="btn btn-primary learn-more">바로 시작(디버그)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- HOWTO POPUP -->
+  <div id="howtoOverlay" class="howto" role="dialog" aria-modal="true" aria-label="게임 방법 안내">
+    <div class="howto-inner">
+      <img src="assets/howto.png" alt="게임 방법 안내 이미지" />
+      <button id="btnCloseHowto" class="btn-close learn-more" aria-label="닫기">✕</button>
+    </div>
+  </div>
+
+  <!-- 클릭 사운드: 로컬 경로로 참조 -->
+  <audio id="clickSnd" preload="auto" src="../asset/audio/button-394464.mp3"></audio>
+
+  <script>
+    const $ = (s)=>document.querySelector(s);
+    const showBlock = (el)=>{ el.classList.add('active'); };
+    const hideBlock = (el)=>{ el.classList.remove('active'); };
+    const showFlex = (el)=>{ el.style.display='flex'; };
+    const hideEl  = (el)=>{ el.style.display='none'; };
+
+    const screens = { splash: $('#splash'), lobby: $('#lobby') };
+
+    // Splash elements
+    const splashVideo = $('#splashVideo');
+    const splashWrap = $('#splashWrap');
+
+    // Others
+    const waiting = $('#waiting');
+    const howto = $('#howtoOverlay');
+    const btnCloseHowto = $('#btnCloseHowto');
+
+    // 클릭 사운드 재생 헬퍼
+    const clickSnd = document.getElementById('clickSnd');
+    function playClickSound(){
+      try{
+        clickSnd.currentTime = 0;
+        const p = clickSnd.play();
+        if(p && p.catch) p.catch(()=>{});
+      }catch(e){}
+    }
+
+    // 모든 버튼에 클릭 시 사운드 재생 연결
+    document.addEventListener('DOMContentLoaded', ()=>{
+      document.querySelectorAll('button').forEach(btn=>{
+        btn.addEventListener('click', ()=>{ playClickSound(); });
+      });
+    });
+
+    // Splash 재생 로직
+    const SPLASH_FAILBACK_MS = 3500;
+    (async function playSplash(){
+      try{
+        const p = splashVideo.play();
+        if(p) await p;
+        splashVideo.addEventListener('ended', goLobbyDirect);
+        setTimeout(()=>{ if(screens.splash.classList.contains('active')) goLobbyDirect(); }, SPLASH_FAILBACK_MS);
+      }catch(e){}
+    })();
+
+    // 스플래시 클릭으로 로비 진입
+    splashWrap.addEventListener('click', ()=>{
+      try { if (navigator.vibrate) navigator.vibrate(20); } catch(_){}
+      goLobbyDirect();
+    });
+
+    function goLobbyDirect(){
+      if(!screens.splash.classList.contains('active')) return;
+      hideBlock(screens.splash);
+      showBlock(screens.lobby);
+      console.log('[Flow] Splash(logo) → Lobby (intro removed)');
+    }
+
+    // 팝업/게임 시작 로직
+    $('#btnHowTo').addEventListener('click', ()=>{ showFlex(howto); });
+    btnCloseHowto.addEventListener('click', ()=>{ hideEl(howto); });
+
+    $('#btnStart').addEventListener('click', async ()=>{
+      waiting.classList.add('active');
+      await new Promise(res=>setTimeout(res,2000)); // mock prepare
+      startGame();
+    });
+    $('#btnCancel').addEventListener('click', ()=>waiting.classList.remove('active'));
+    $('#btnForceStart').addEventListener('click', startGame);
+
+    function startGame(){
+      waiting.classList.remove('active');
+      alert('여기서 실제 게임 씬으로 전환합니다.');
+    }
+
+    // iOS 주소창 높이 대응
+    document.documentElement.style.setProperty('--vh', window.innerHeight * 0.01 + 'px');
+    window.addEventListener('resize', ()=>{ document.documentElement.style.setProperty('--vh', window.innerHeight * 0.01 + 'px'); });
+  </script>
+</body>
+</html>
