@@ -173,7 +173,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
       v.src = opts.src || spawnConfig.bucketSrc;
       v.muted = true;
       v.playsInline = true;
-      v.loop = true;
+      // 변경: 기본적으로 loop 끄기 -> 한 번 재생 후 'ended' 이벤트로 멈춤
+      v.loop = !!(opts.loop !== undefined ? opts.loop : false);
       v.preload = 'auto';
       v.style.width = size + 'px';
       v.style.height = size + 'px';
@@ -184,7 +185,26 @@ document.addEventListener('DOMContentLoaded', ()=>{
       dynRoot.appendChild(v);
       void v.offsetWidth;
       v.classList.add('shown');
+
+      // 재생이 끝나면 '고정(static)' 시킴 — transition 제거, shown 클래스 제거
+      v.addEventListener('ended', function onEnded(){
+        try{
+          // pause at end so the last frame stays visible
+          v.pause();
+          // remove animated shown class to avoid further transitions
+          v.classList.remove('shown');
+          // prevent future CSS transitions/animations that could move it
+          v.style.transition = 'none';
+          // mark as static for CSS hooks if needed
+          v.classList.add('static');
+        }catch(_){}
+        // remove this listener (cleanup)
+        try{ v.removeEventListener('ended', onEnded); }catch(_){}
+      }, { once:true });
+
+      // try to play (some browsers may block, so ignore rejections)
       v.play().catch(()=>{});
+
       const bucketObj = { el:v, i,j };
       state.buckets.push(bucketObj);
       const lifeMs = (opts.lifeMs !== undefined ? opts.lifeMs : spawnConfig.bucketLifeMs);
