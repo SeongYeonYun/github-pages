@@ -1,4 +1,4 @@
-// soap_game_core.js (patched - safe canvas guards + dynamic canvas creation)
+// soap_game_core.js (patched - drawObjects disabled, canvas z-index lowered)
 (function(){
   const U = window.soapUtils;
   const O = window.soapObstacles;
@@ -13,7 +13,9 @@
   let cUI = null;
 
   // z-index mapping for dynamically created canvases
-  const CANVAS_Z = { 'bg-canvas': 2, 'board-canvas': 50, 'ui-canvas': 80 };
+  // NOTE: set to 0 so they do NOT cover the scene image (#scene-img has z-index:1).
+  // If you later want canvases visible above the scene image, increase these values.
+  const CANVAS_Z = { 'bg-canvas': 0, 'board-canvas': 0, 'ui-canvas': 0 };
 
   function refreshCanvases(){
     // attempt to find existing canvases
@@ -38,6 +40,7 @@
       el.style.pointerEvents = 'none';
       el.style.opacity = '1';
       el.style.zIndex = (CANVAS_Z[id] || 1).toString();
+      el.style.background = 'transparent';
       // ensure smallest possible initial size
       el.width = 2; el.height = 2;
       // append as first child so background is below other elements
@@ -317,7 +320,12 @@
     drawBoardFrame(ctxBoard, boardArea);
     const checker = drawChecker(ctxBoard, boardArea, 4, 4);
 
-    O.drawObjects(ctxBoard, checker);
+    // ================================
+    // IMPORTANT: disabled scene object drawing here to avoid canvas-drawn
+    // decorations covering the real scene image.
+    // If you want objects back, uncomment the next line.
+    // O.drawObjects(ctxBoard, checker);
+    // ================================
 
     platformRects = O.drawLowerPlatforms(ctxBoard, W, H, boardArea) || [];
 
