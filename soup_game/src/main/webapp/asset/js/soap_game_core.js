@@ -1,4 +1,5 @@
 // soap_game_core.js (patched - drawObjects disabled, canvas z-index lowered)
+// Includes precise button-aligned hitboxes for dpad (setupDpad)
 (function(){
   const U = window.soapUtils;
   const O = window.soapObstacles;
@@ -219,29 +220,237 @@
   window.addEventListener('keydown', (e)=>{ keys[e.key.toLowerCase()] = true; });
   window.addEventListener('keyup', (e)=>{ keys[e.key.toLowerCase()] = false; });
 
+  // -----------------------
+  // setupDpad - precise button-aligned hitboxes + slide switching
+  // -----------------------
   function setupDpad(){
-    const upBtn = document.querySelector('.dpad .dir.up');
-    const rightBtn = document.querySelector('.dpad .dir.right');
-    const downBtn = document.querySelector('.dpad .dir.down');
-    const leftBtn = document.querySelector('.dpad .dir.left');
-    const btns = [
-      {el: upBtn, key: 'up'},
-      {el: rightBtn, key: 'right'},
-      {el: downBtn, key: 'down'},
-      {el: leftBtn, key: 'left'}
-    ];
-    btns.forEach(item=>{
-      if(!item.el) return;
-      const el = item.el;
-      el.addEventListener('pointerdown', (ev)=>{ ev.preventDefault(); try{ el.setPointerCapture(ev.pointerId); }catch(e){} dirState[item.key] = true; });
-      const stop = (ev)=>{ try{ el.releasePointerCapture && el.releasePointerCapture(ev && ev.pointerId); }catch(e){} dirState[item.key] = false; };
-      el.addEventListener('pointerup', stop);
-      el.addEventListener('pointercancel', stop);
-      el.addEventListener('pointerleave', (ev)=>{ if(ev.buttons === 0) dirState[item.key] = false; });
-      el.addEventListener('keydown', (ev)=>{ if(ev.key === ' ' || ev.key === 'Enter'){ ev.preventDefault(); dirState[item.key] = true; } });
-      el.addEventListener('keyup', (ev)=>{ if(ev.key === ' ' || ev.key === 'Enter'){ dirState[item.key] = false; } });
-      el.addEventListener('mouseup', ()=>{ dirState[item.key] = false; });
+    const container = document.getElementById('direction-buttons');
+    if(!container) {
+      console.warn('setupDpad: #direction-buttons not found — skipping dpad setup.');
+      return;
+    }
+    // ensure touch behavior
+    container.style.touchAction = 'none';
+    container.style.userSelect = 'none';
+
+    // button ids we expect
+    const btns = {
+      up:    document.getElementById('up-btn'),
+      right: document.getElementById('right-btn'),
+      down:  document.getElementById('down-btn'),
+      left:  document.getElementById('left-btn')
+    };
+
+    // debug flag: set true to draw visible outlines for hitboxes
+    const SHOW_HITBOX_DEBUG = false;
+    let debugEls = {};
+
+    // helper: (re)layout buttons to precisely match container size
+    function layoutButtons(){
+      const rect = container.getBoundingClientRect();
+      const W = rect.width, H = rect.height;
+      // base tile size: half of smallest axis (so 4-quadrant dpad)
+      const s = Math.min(W, H);
+      const half = s / 2;
+
+      // center offsets
+      // const cx = rect.left + W/2;
+      // const cy = rect.top + H/2;
+
+      // For responsive: set button sizes to half-width/half-height and position them so
+      // they align with the dpad visual centered in the container.
+      // up
+      if(btns.up){
+        const w = Math.round(half), h = Math.round(half);
+        btns.up.style.position = 'absolute';
+        btns.up.style.width = w + 'px';
+        btns.up.style.height = h + 'px';
+        // place centered horizontally, at top quarter
+        const left = Math.round((W - w)/2);
+        const top  = Math.round((H - h)/2 - half/2);
+        btns.up.style.left = left + 'px';
+        btns.up.style.top  = top + 'px';
+        btns.up.style.pointerEvents = 'auto';
+      }
+      // down
+      if(btns.down){
+        const w = Math.round(half), h = Math.round(half);
+        btns.down.style.position = 'absolute';
+        btns.down.style.width = w + 'px';
+        btns.down.style.height = h + 'px';
+        const left = Math.round((W - w)/2);
+        const top  = Math.round((H - h)/2 + half/2);
+        btns.down.style.left = left + 'px';
+        btns.down.style.top  = top + 'px';
+        btns.down.style.pointerEvents = 'auto';
+      }
+      // left
+      if(btns.left){
+        const w = Math.round(half), h = Math.round(half);
+        btns.left.style.position = 'absolute';
+        btns.left.style.width = w + 'px';
+        btns.left.style.height = h + 'px';
+        const left = Math.round((W - w)/2 - half/2);
+        const top  = Math.round((H - h)/2);
+        btns.left.style.left = left + 'px';
+        btns.left.style.top  = top + 'px';
+        btns.left.style.pointerEvents = 'auto';
+      }
+      // right
+      if(btns.right){
+        const w = Math.round(half), h = Math.round(half);
+        btns.right.style.position = 'absolute';
+        btns.right.style.width = w + 'px';
+        btns.right.style.height = h + 'px';
+        const left = Math.round((W - w)/2 + half/2);
+        const top  = Math.round((H - h)/2);
+        btns.right.style.left = left + 'px';
+        btns.right.style.top  = top + 'px';
+        btns.right.style.pointerEvents = 'auto';
+      }
+
+      // update debug overlays if enabled
+      if(SHOW_HITBOX_DEBUG){
+        Object.keys(btns).forEach(k=>{
+          const b = btns[k];
+          if(!b) return;
+          if(!debugEls[k]){
+            const de = document.createElement('div');
+            de.style.position = 'absolute';
+            de.style.border = '2px dashed rgba(255,0,0,0.85)';
+            de.style.pointerEvents = 'none';
+            container.appendChild(de);
+            debugEls[k] = de;
+          }
+          const br = b.getBoundingClientRect();
+          // position relative to container
+          const crect = container.getBoundingClientRect();
+          debugEls[k].style.left = (br.left - crect.left) + 'px';
+          debugEls[k].style.top  = (br.top  - crect.top)  + 'px';
+          debugEls[k].style.width = br.width + 'px';
+          debugEls[k].style.height = br.height + 'px';
+        });
+      } else {
+        // remove debug els if present
+        Object.values(debugEls).forEach(e=>{ try{ e.remove(); }catch(_){} });
+        debugEls = {};
+      }
+    }
+
+    // determine which button (key) is under client point
+    function hitTestButton(clientX, clientY){
+      // use elementFromPoint for visual accuracy first
+      const el = document.elementFromPoint(clientX, clientY);
+      if(el){
+        // check if it's exactly one of our buttons or inside it
+        for(const k of Object.keys(btns)){
+          if(!btns[k]) continue;
+          if(btns[k] === el || btns[k].contains(el)) return k;
+        }
+      }
+      // fallback: bounding rect containment
+      for(const k of Object.keys(btns)){
+        const b = btns[k];
+        if(!b) continue;
+        const r = b.getBoundingClientRect();
+        if(clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) return k;
+      }
+      return null;
+    }
+
+    // apply direction exclusively
+    function setExclusiveDir(key){
+      dirState.up = dirState.right = dirState.down = dirState.left = false;
+      if(key) dirState[key] = true;
+      // set player immediate velocity
+      let dx=0, dy=0;
+      if(key === 'left') dx = -1;
+      if(key === 'right') dx = 1;
+      if(key === 'up') dy = -1;
+      if(key === 'down') dy = 1;
+      if(dx !== 0 || dy !== 0){
+        const len = Math.hypot(dx, dy) || 1;
+        player.vx = (dx/len) * player.speed;
+        player.vy = (dy/len) * player.speed;
+      } else { player.vx = 0; player.vy = 0; }
+    }
+
+    // clear the key on release; if another held key exists, apply it
+    function clearKey(key){
+      if(key) dirState[key] = false;
+      if(dirState.up||dirState.right||dirState.down||dirState.left){
+        let dx=0,dy=0; if(dirState.left) dx--; if(dirState.right) dx++; if(dirState.up) dy--; if(dirState.down) dy++;
+        const len = Math.hypot(dx,dy) || 1;
+        player.vx = (dx/len)*player.speed;
+        player.vy = (dy/len)*player.speed;
+      } else { player.vx = 0; player.vy = 0; }
+    }
+
+    // attach pointer handlers to each button: capture + slide switching via global pointermove
+    let activePointerId = null;
+    let activeKey = null;
+
+    function onPointerDownButton(ev, key){
+      ev.preventDefault && ev.preventDefault();
+      try{ if(ev.pointerId && ev.target.setPointerCapture) ev.target.setPointerCapture(ev.pointerId); }catch(e){}
+      activePointerId = ev.pointerId;
+      activeKey = key;
+      setExclusiveDir(key);
+    }
+    function onPointerMoveGlobal(ev){
+      if(activePointerId === null || ev.pointerId !== activePointerId) return;
+      const hit = hitTestButton(ev.clientX, ev.clientY);
+      if(hit !== activeKey){
+        // switch direction live
+        activeKey = hit;
+        setExclusiveDir(activeKey);
+      }
+    }
+    function onPointerUpButton(ev, key){
+      try{ if(ev.pointerId && ev.target.releasePointerCapture) ev.target.releasePointerCapture(ev.pointerId); }catch(e){}
+      // if this was the active pointer, clear
+      if(ev.pointerId === activePointerId) {
+        activePointerId = null;
+        activeKey = null;
+        clearKey(key);
+      } else {
+        // otherwise just clear that specific key (rare)
+        clearKey(key);
+      }
+    }
+
+    // attach/ensure events
+    Object.keys(btns).forEach(k=>{
+      const b = btns[k];
+      if(!b) return;
+      // prevent duplicate binds
+      if(b.__dpad_bound) return;
+      b.__dpad_bound = true;
+      // make sure each button is focusable for accessibility
+      if(typeof b.tabIndex === 'number' && b.tabIndex < 0) b.tabIndex = 0;
+      b.addEventListener('pointerdown', (ev)=> onPointerDownButton(ev, k), { passive:false });
+      b.addEventListener('pointerup',   (ev)=> onPointerUpButton(ev, k));
+      b.addEventListener('pointercancel',(ev)=> onPointerUpButton(ev, k));
+      b.addEventListener('pointerleave', (ev)=>{ if(ev.buttons === 0) onPointerUpButton(ev, k); });
+      // keyboard fallback
+      b.addEventListener('keydown', (ev)=>{ if(ev.key === ' ' || ev.key === 'Enter'){ ev.preventDefault(); setExclusiveDir(k); } });
+      b.addEventListener('keyup',   (ev)=>{ if(ev.key === ' ' || ev.key === 'Enter'){ clearKey(k); } });
     });
+
+    // global pointermove listener for slide switching
+    window.addEventListener('pointermove', onPointerMoveGlobal, { passive:true });
+
+    // mouse fallback: mouseup clears all
+    document.addEventListener('mouseup', ()=>{ activePointerId = null; activeKey = null; clearKey(null); });
+
+    // layout on init + resize (and after a small delay to catch fonts/images)
+    function scheduleLayout(){
+      try{ layoutButtons(); }catch(e){ console.warn('layoutButtons failed', e); }
+    }
+    scheduleLayout();
+    window.addEventListener('resize', scheduleLayout);
+    // also re-run shortly after load to accomodate late image reflow
+    setTimeout(scheduleLayout, 120);
   }
 
   function handleInput(){

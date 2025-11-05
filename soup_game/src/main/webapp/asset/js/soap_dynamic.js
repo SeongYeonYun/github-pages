@@ -1,11 +1,6 @@
 document.addEventListener('DOMContentLoaded', ()=>{
 
   // ===== spawnConfig (주석으로 설명) =====
-  // bucketSpawnIntervalMs : 대야(버킷) 스폰 간격 (ms)
-  // bucketLifeMs          : 대야 유지 시간 (ms)
-  // bucketCountPerSpawn   : 한 스폰당 대야 개수
-  // boardShowOnStart      : 카운트다운 끝나자마자 잎간판 생성 여부
-  // boardScale            : 타일 대비 잎간판 크기
   const spawnConfig = {
     bucketSrc: '../asset/mvi/bucket_color2.webm',
     boardSrc:  '../asset/mvi/BOARD_COLOR.webm',
@@ -17,7 +12,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
     boardLoop: false
   };
 
-  // small helper: warn once per key
   const _warned = new Set();
   function warnOnce(key, msg){
     if(!_warned.has(key)){
@@ -26,7 +20,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
     }
   }
 
-  // DOM (safe query)
   const board = document.getElementById('game-board');
   const sceneImg = document.getElementById('scene-img');
   const boardOverlay = document.getElementById('board-overlay');
@@ -54,7 +47,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(timerEl && !timerLabel) warnOnce('timerlabel-missing', 'Warning: .label inside #timer not found.');
   if(timerEl && !timerFill) warnOnce('timerfill-missing', 'Warning: .fill inside #timer not found.');
 
-  // fallback dynamic root (if missing)
   const dynRoot = dynamicRoot || (function(){
     const e = document.createElement('div');
     e.id = 'dynamic-root-fallback';
@@ -77,7 +69,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
     const imgRect = sceneImg.getBoundingClientRect();
     const naturalW = sceneImg.naturalWidth || imgRect.width;
     const naturalH = sceneImg.naturalHeight || imgRect.height;
-    // avoid division by zero
     if(!naturalW || !naturalH){ warnOnce('natural-dim-zero', 'computeGrid: naturalW/H zero — using display sizes.'); }
     const displayW = imgRect.width || naturalW;
     const displayH = imgRect.height || naturalH;
@@ -110,20 +101,37 @@ document.addEventListener('DOMContentLoaded', ()=>{
   function nodePos(i,j){ return { x: pixelNodesX[Math.max(0,Math.min(TILES_X,i))], y: pixelNodesY[Math.max(0,Math.min(TILES_Y,j))] }; }
   function tileCenter(tx,ty){ const ti = Math.max(0,Math.min(TILES_X-1,tx)); const tj = Math.max(0,Math.min(TILES_Y-1,ty)); const cx = gridLeft + (ti + 0.5) * tileW; const cy = gridTop + (tj + 0.5) * tileH; return { x: cx, y: cy, w: tileW, h: tileH }; }
 
-  // player
-  let node = { i: Math.floor(TILES_X/2), j: Math.floor(TILES_Y/2) };
-  let dir = { x:1, y:0 };
+  // spawn tile (bottom middle)
+  const spawnTile = { tx: Math.floor(TILES_X/2), ty: Math.max(0, TILES_Y-1) };
+  function tileBottomCenter(tx, ty){
+    const ti = Math.max(0, Math.min(TILES_X-1, tx));
+    const tj = Math.max(0, Math.min(TILES_Y-1, ty));
+    const x = gridLeft + (ti + 0.5) * tileW;
+    const y = gridTop + (tj + 1) * tileH;
+    return { x, y, w: tileW, h: tileH };
+  }
+
+  // player state
+  let node = { i: spawnTile.tx, j: spawnTile.ty };
+  let dir = { x:0, y:-1 }; // face UP initially
   let queuedDir = null;
   let moving = false;
   let lastTs = null;
   let gameOver = false;
   let MOVE_EPS = 8;
 
-  function placeSoapAtNode(i,j){
+  function placeSoapAtNode(i,j, align){
     if(!soup){ warnOnce('placeSoapNoSoup', 'placeSoapAtNode: #soup_item missing - skipping.'); return; }
-    const p = nodePos(i,j);
-    soup.style.left = p.x + 'px';
-    soup.style.top  = p.y + 'px';
+    if(align === 'bottom'){
+      const t = tileBottomCenter(i,j);
+      const offsetUp = Math.max(6, Math.round(Math.min(tileW, tileH) * 0.18));
+      soup.style.left = t.x + 'px';
+      soup.style.top  = (t.y - offsetUp) + 'px';
+    } else {
+      const p = nodePos(i,j);
+      soup.style.left = p.x + 'px';
+      soup.style.top  = p.y + 'px';
+    }
   }
   function getSoapCenter(){
     if(!soup || !board){ warnOnce('getSoapNoElements', 'getSoapCenter: soup or board missing - returning 0,0.'); return { x:0, y:0 }; }
@@ -140,7 +148,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
     if(soup) soup.style.transform = `translate(-50%,-50%) rotate(${angle}deg)`;
   }
 
-  // dynamic state
   const state = { buckets: [], board: null, bucketTimer: null };
 
   function createWarnArea(px, py, w, h, duration=300){
@@ -173,7 +180,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
       v.src = opts.src || spawnConfig.bucketSrc;
       v.muted = true;
       v.playsInline = true;
-      // 변경: 기본적으로 loop 끄기 -> 한 번 재생 후 'ended' 이벤트로 멈춤
       v.loop = !!(opts.loop !== undefined ? opts.loop : false);
       v.preload = 'auto';
       v.style.width = size + 'px';
@@ -186,23 +192,16 @@ document.addEventListener('DOMContentLoaded', ()=>{
       void v.offsetWidth;
       v.classList.add('shown');
 
-      // 재생이 끝나면 '고정(static)' 시킴 — transition 제거, shown 클래스 제거
       v.addEventListener('ended', function onEnded(){
         try{
-          // pause at end so the last frame stays visible
           v.pause();
-          // remove animated shown class to avoid further transitions
           v.classList.remove('shown');
-          // prevent future CSS transitions/animations that could move it
           v.style.transition = 'none';
-          // mark as static for CSS hooks if needed
           v.classList.add('static');
         }catch(_){}
-        // remove this listener (cleanup)
         try{ v.removeEventListener('ended', onEnded); }catch(_){}
       }, { once:true });
 
-      // try to play (some browsers may block, so ignore rejections)
       v.play().catch(()=>{});
 
       const bucketObj = { el:v, i,j };
@@ -217,19 +216,46 @@ document.addEventListener('DOMContentLoaded', ()=>{
     }, 200);
   }
 
+  // spawnBoardAtTile: creates a static board (no falling). Returns state.board or false if blocked.
   function spawnBoardAtTile(tx,ty, opts){
     if(gameOver) return;
     opts = opts||{};
     computeGrid();
+
+    // Block spawn if within spawnTile's 1-tile radius
+    const dxSpawn = Math.abs(tx - spawnTile.tx);
+    const dySpawn = Math.abs(ty - spawnTile.ty);
+    if(dxSpawn <= 1 && dySpawn <= 1){
+      return false;
+    }
+
+    // Also block spawn if within 1 tile of current soap node (to avoid immediate collision / blocking)
+    const dxNode = Math.abs(tx - node.i);
+    const dyNode = Math.abs(ty - node.j);
+    if(dxNode <= 1 && dyNode <= 1){
+      return false;
+    }
+
+    // also block directly in front of soap (the very next tile in facing direction)
+    const forwardTx = node.i + dir.x;
+    const forwardTy = node.j + dir.y;
+    if(forwardTx >= 0 && forwardTx < TILES_X && forwardTy >= 0 && forwardTy < TILES_Y){
+      if(tx === forwardTx && ty === forwardTy) return false;
+    }
+
     const tile = tileCenter(tx,ty);
     const size = Math.round(Math.min(tileW,tileH) * (opts.scale || spawnConfig.boardScale || 1));
-    createWarnArea(tile.x, tile.y, size, size, 250);
 
-    setTimeout(()=>{
-      if(state.board && state.board.el){ try{ state.board.el.pause(); state.board.el.remove(); }catch(_){} state.board=null; }
+    if(state.board && state.board.el){
+      try{ state.board.el.pause(); state.board.el.remove(); }catch(_){} 
+      state.board=null;
+    }
+
+    const src = opts.src || spawnConfig.boardSrc;
+    if(src && src.endsWith('.webm')){
       const v = document.createElement('video');
-      v.className = 'board-video';
-      v.src = opts.src || spawnConfig.boardSrc;
+      v.className = 'board-video static';
+      v.src = src;
       v.muted = true;
       v.playsInline = true;
       v.loop = !!(opts.loop !== undefined ? opts.loop : spawnConfig.boardLoop);
@@ -238,21 +264,58 @@ document.addEventListener('DOMContentLoaded', ()=>{
       v.style.height = size + 'px';
       v.style.left = tile.x + 'px';
       v.style.top  = tile.y + 'px';
-      v.style.setProperty('--tilt-deg', '45deg');
-      v.style.setProperty('--pop-duration', '420ms');
+      v.style.setProperty('--tilt-deg', '0deg');
+      v.style.setProperty('--pop-duration', '0ms');
+      v.classList.remove('shown');
+      v.style.transition = 'none';
+      v.style.opacity = '1';
       dynRoot.appendChild(v);
-      void v.offsetWidth;
-      v.classList.add('shown');
-      v.loop = false;
-      v.play().catch(()=>{});
-      // keep element after play finished (stays fixed)
-      v.addEventListener('ended', ()=>{ try{ v.pause(); }catch(_){} });
-      state.board = { el:v, tx, ty };
-    }, 150);
+      state.board = { el: v, tx, ty, fixed: !!opts.fixed };
+      return state.board;
+    } else {
+      const d = document.createElement('div');
+      d.className = 'board-static';
+      d.style.position = 'absolute';
+      d.style.left = tile.x + 'px';
+      d.style.top = tile.y + 'px';
+      d.style.width = size + 'px';
+      d.style.height = size + 'px';
+      d.style.transform = 'translate(-50%,-50%)';
+      d.style.borderRadius = '8px';
+      d.style.background = 'rgba(0,150,120,0.12)';
+      d.style.border = '2px solid rgba(0,150,120,0.18)';
+      d.style.pointerEvents = 'none';
+      dynRoot.appendChild(d);
+      state.board = { el: d, tx, ty, fixed: true };
+      return state.board;
+    }
   }
 
-  function randomNodeIndex(){ return { i: Math.floor(Math.random()*(TILES_X+1)), j: Math.floor(Math.random()*(TILES_Y+1)) }; }
-  function randomTileIndex(){ return { tx: Math.floor(Math.random()*TILES_X), ty: Math.floor(Math.random()*TILES_Y) }; }
+  // choose a random tile excluding spawn radius, node radius, and direct forward tile
+  function randomTileIndexAvoidSpawn(){
+    const candidates = [];
+    for(let tx=0; tx<TILES_X; tx++){
+      for(let ty=0; ty<TILES_Y; ty++){
+        const dxSpawn = Math.abs(tx - spawnTile.tx);
+        const dySpawn = Math.abs(ty - spawnTile.ty);
+        if(dxSpawn <= 1 && dySpawn <= 1) continue;
+
+        const dxNode = Math.abs(tx - node.i);
+        const dyNode = Math.abs(ty - node.j);
+        if(dxNode <= 1 && dyNode <= 1) continue;
+
+        const forwardTx = node.i + dir.x;
+        const forwardTy = node.j + dir.y;
+        if(forwardTx >= 0 && forwardTx < TILES_X && forwardTy >= 0 && forwardTy < TILES_Y){
+          if(tx === forwardTx && ty === forwardTy) continue;
+        }
+
+        candidates.push({ tx, ty });
+      }
+    }
+    if(candidates.length === 0) return null;
+    return candidates[Math.floor(Math.random()*candidates.length)];
+  }
 
   function checkCollisions(){
     if(gameOver) return;
@@ -260,13 +323,16 @@ document.addEventListener('DOMContentLoaded', ()=>{
     const boardRect = board ? board.getBoundingClientRect() : { left:0, top:0 };
     const soapScreenX = boardRect.left + soap.x;
     const soapScreenY = boardRect.top + soap.y;
-    if(state.board && state.board.el){
+
+    // IMPORTANT: while soap is moving, ignore board collision entirely
+    if(!moving && state.board && state.board.el){
       const r = state.board.el.getBoundingClientRect();
       if(soapScreenX >= r.left && soapScreenX <= r.right && soapScreenY >= r.top && soapScreenY <= r.bottom){
         triggerGameOver('잎간판에 부딪혔습니다.');
         return;
       }
     }
+
     for(const b of state.buckets.slice()){
       if(!b.el) continue;
       const r = b.el.getBoundingClientRect();
@@ -277,7 +343,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
     }
   }
 
-  // bucket loop: inner/outer wrappers kept but simplified for safety
   function startBucketLoop_inner(){
     stopBucketLoop_inner();
     state.bucketTimer = setInterval(()=>{
@@ -294,11 +359,11 @@ document.addEventListener('DOMContentLoaded', ()=>{
     }, Math.max(100, spawnConfig.bucketSpawnIntervalMs || 1000));
   }
   function stopBucketLoop_inner(){ if(state.bucketTimer){ clearInterval(state.bucketTimer); state.bucketTimer=null; } }
-  function startBucketLoop(){ startBucketLoop_inner(); } // alias
+  function startBucketLoop(){ startBucketLoop_inner(); }
   function stopBucketLoop(){ stopBucketLoop_inner(); }
   function startBucketLoop_actual(){ startBucketLoop_inner(); }
 
-  // timer
+  // timer helpers (unchanged)
   let timerStart = null, timerAccum = 0, timerRunning=false, timerRAF=null;
   function formatMS(ms){ const s=Math.floor(ms/1000); const mm=Math.floor(s/60).toString().padStart(2,'0'); const ss=(s%60).toString().padStart(2,'0'); return `${mm}:${ss}`; }
   function startTimer(){ 
@@ -388,7 +453,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
       const dist = Math.hypot(vx,vy);
       if(dist <= MOVE_EPS){
         node.i = nextI; node.j = nextJ;
-        placeSoapAtNode(node.i,node.j);
+        // place at node center after arriving
+        placeSoapAtNode(node.i,node.j, 'center');
+        // Once arrival happens, collisions with board will be checked again in next iteration (moving===true only during travel)
         if(queuedDir){
           const ci = node.i + queuedDir.x, cj = node.j + queuedDir.y;
           if(!(ci<0||ci>TILES_X||cj<0||cj> TILES_Y)) applyDirection(queuedDir.x, queuedDir.y);
@@ -404,7 +471,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     requestAnimationFrame(loop);
   }
 
-  // input wiring
+  // input wiring (unchanged)
   const dirMap = { 'UP':{dx:0,dy:-1}, 'RIGHT':{dx:1,dy:0}, 'DOWN':{dx:0,dy:1}, 'LEFT':{dx:-1,dy:0} };
   ['up','right','down','left'].forEach(id=>{
     const btn = document.getElementById(id+'-btn');
@@ -429,13 +496,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   // start/flow
   function afterCountdownStart(){
-    if(spawnConfig.boardShowOnStart){
-      const {tx,ty} = randomTileIndex();
-      spawnBoardAtTile(tx,ty,{ src: spawnConfig.boardSrc, scale: spawnConfig.boardScale, loop: spawnConfig.boardLoop });
-    }
     moving = true;
     lastTs = null;
-    // start bucket loop and timer
     startBucketLoop_actual();
     startTimer();
     if(typeof loop === 'function') requestAnimationFrame(loop);
@@ -467,34 +529,50 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   function initFlow(){
     computeGrid();
-    placeSoapAtNode(node.i,node.j);
+
+    // place soap at spawn tile bottom-center and face UP (but do not start moving until countdown finished)
+    placeSoapAtNode(spawnTile.tx, spawnTile.ty, 'bottom');
+    applyDirection(0,-1); // face up
+
+    // If configured to show board on start, place a fixed board now (before countdown)
+    if(spawnConfig.boardShowOnStart){
+      const pick = randomTileIndexAvoidSpawn();
+      if(pick){
+        spawnBoardAtTile(pick.tx, pick.ty, { src: spawnConfig.boardSrc, scale: spawnConfig.boardScale, fixed: true });
+      } else {
+        warnOnce('noValidBoardTile', 'initFlow: could not find a valid tile to place board avoiding spawn radius.');
+      }
+    }
+
     runCountdown(3, ()=>{ afterCountdownStart(); });
   }
 
-  // ensure scene image loaded / fallback
   if(sceneImg && sceneImg.complete) { setTimeout(initFlow, 120); }
   else if(sceneImg){
     sceneImg.addEventListener('load', ()=>{ setTimeout(initFlow, 120); }, { once:true });
     setTimeout(()=>{ if(!sceneImg.complete) initFlow(); }, 800);
   } else {
-    // no scene image: still try to init after small delay
     setTimeout(()=>{
       warnOnce('noSceneImgInit','No sceneImg element — running initFlow with reduced assumptions.');
       initFlow();
     }, 120);
   }
 
-  // Expose simple API
-  window.setSpawnConfig = (opts={})=>{ Object.assign(spawnConfig, opts||{}); if(state.bucketTimer){ stopBucketLoop(); startBucketLoop_actual(); } };
-  window.clearAll = ()=>{ 
-    stopBucketLoop(); 
-    state.buckets.forEach(b=>{ try{ clearTimeout(b._removeTimeout); b.el.pause(); b.el.remove(); }catch(_){} }); 
-    state.buckets=[]; 
-    if(state.board && state.board.el){ try{ state.board.el.pause(); state.board.el.remove(); }catch(_){} } 
-    state.board=null; 
+  window.setSpawnConfig = (opts={})=>{
+    Object.assign(spawnConfig, opts||{});
+    if(state.bucketTimer){ stopBucketLoop(); startBucketLoop_actual(); }
+  };
+  window.clearAll = ()=>{
+    stopBucketLoop();
+    state.buckets.forEach(b=>{ try{ clearTimeout(b._removeTimeout); b.el.pause(); b.el.remove(); }catch(_){} });
+    state.buckets=[];
+    if(state.board && state.board.el){ try{ state.board.el.pause(); state.board.el.remove(); }catch(_){} }
+    state.board=null;
   };
 
-  // resize handler
-  window.addEventListener('resize', ()=>{ computeGrid(); placeSoapAtNode(node.i,node.j); });
+  window.addEventListener('resize', ()=>{ computeGrid(); placeSoapAtNode(spawnTile.tx, spawnTile.ty, 'bottom'); });
+
+  function randomNodeIndex(){ return { i: Math.floor(Math.random()*(TILES_X+1)), j: Math.floor(Math.random()*(TILES_Y+1)) }; }
+  function randomTileIndex(){ return { tx: Math.floor(Math.random()*TILES_X), ty: Math.floor(Math.random()*TILES_Y) }; }
 
 }); // DOMContentLoaded
