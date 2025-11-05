@@ -3,7 +3,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   // ===== spawnConfig (주석으로 설명) =====
   const spawnConfig = {
     bucketSrc: '../asset/mvi/bucket_color2.webm',
-    boardSrc:  '../asset/mvi/BOARD_COLOR.webm',
+    boardSrc:  '../asset/mvi/BOARD_COLOR.apng',
     bucketSpawnIntervalMs: 3000,
     bucketLifeMs: 5000,
     bucketCountPerSpawn: 1,
@@ -127,6 +127,10 @@ document.addEventListener('DOMContentLoaded', ()=>{
       const offsetUp = Math.max(6, Math.round(Math.min(tileW, tileH) * 0.18));
       soup.style.left = t.x + 'px';
       soup.style.top  = (t.y - offsetUp) + 'px';
+    } else if(align === 'center'){
+      const t = tileCenter(i,j);
+      soup.style.left = t.x + 'px';
+      soup.style.top  = t.y + 'px';
     } else {
       const p = nodePos(i,j);
       soup.style.left = p.x + 'px';
@@ -216,7 +220,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     }, 200);
   }
 
-  // spawnBoardAtTile: creates a static board (no falling). Returns state.board or false if blocked.
+  // spawnBoardAtTile: creates a static board (APNG first, webm/div fallback). Returns state.board or false if blocked.
   function spawnBoardAtTile(tx,ty, opts){
     if(gameOver) return;
     opts = opts||{};
@@ -246,49 +250,209 @@ document.addEventListener('DOMContentLoaded', ()=>{
     const tile = tileCenter(tx,ty);
     const size = Math.round(Math.min(tileW,tileH) * (opts.scale || spawnConfig.boardScale || 1));
 
+    // cleanup existing board
     if(state.board && state.board.el){
-      try{ state.board.el.pause(); state.board.el.remove(); }catch(_){} 
+      try{ state.board.el.pause && state.board.el.pause(); state.board.el.remove(); }catch(_){} 
       state.board=null;
     }
 
-    const src = opts.src || spawnConfig.boardSrc;
-    if(src && src.endsWith('.webm')){
-      const v = document.createElement('video');
-      v.className = 'board-video static';
-      v.src = src;
-      v.muted = true;
-      v.playsInline = true;
-      v.loop = !!(opts.loop !== undefined ? opts.loop : spawnConfig.boardLoop);
-      v.preload = 'auto';
-      v.style.width = size + 'px';
-      v.style.height = size + 'px';
-      v.style.left = tile.x + 'px';
-      v.style.top  = tile.y + 'px';
-      v.style.setProperty('--tilt-deg', '0deg');
-      v.style.setProperty('--pop-duration', '0ms');
-      v.classList.remove('shown');
-      v.style.transition = 'none';
-      v.style.opacity = '1';
-      dynRoot.appendChild(v);
-      state.board = { el: v, tx, ty, fixed: !!opts.fixed };
-      return state.board;
-    } else {
-      const d = document.createElement('div');
-      d.className = 'board-static';
-      d.style.position = 'absolute';
-      d.style.left = tile.x + 'px';
-      d.style.top = tile.y + 'px';
-      d.style.width = size + 'px';
-      d.style.height = size + 'px';
-      d.style.transform = 'translate(-50%,-50%)';
-      d.style.borderRadius = '8px';
-      d.style.background = 'rgba(0,150,120,0.12)';
-      d.style.border = '2px solid rgba(0,150,120,0.18)';
-      d.style.pointerEvents = 'none';
-      dynRoot.appendChild(d);
-      state.board = { el: d, tx, ty, fixed: true };
-      return state.board;
+    const srcRaw = (opts.src || spawnConfig.boardSrc || '').toString();
+    const src = srcRaw.trim();
+
+    const imgExtRE = /\.(apng|png|gif|webp|jpe?g|svg)$/i;
+    const vidExtRE = /\.(webm|mp4|ogg)$/i;
+
+    // video source -> create video element
+    if(vidExtRE.test(src)){
+      try{
+        const v = document.createElement('video');
+        v.className = 'board-video static';
+        v.src = src;
+        v.muted = true;
+        v.playsInline = true;
+        v.loop = !!(opts.loop !== undefined ? opts.loop : spawnConfig.boardLoop);
+        v.preload = 'auto';
+        v.style.position = 'absolute';
+        v.style.width = size + 'px';
+        v.style.height = size + 'px';
+        v.style.left = tile.x + 'px';
+        v.style.top  = tile.y + 'px';
+        v.style.transform = 'translate(-50%,-50%)';
+        v.style.setProperty('--tilt-deg', '0deg');
+        v.style.setProperty('--pop-duration', '0ms');
+        v.classList.remove('shown');
+        v.style.transition = 'none';
+        v.style.opacity = '1';
+        v.style.pointerEvents = 'none';
+        dynRoot.appendChild(v);
+        // try play
+        v.play && v.play().catch(()=>{});
+        state.board = { el: v, tx, ty, fixed: !!opts.fixed };
+        return state.board;
+      }catch(e){
+        warnOnce('spawnBoardVideoErr','spawnBoardAtTile video creation failed: '+(e && e.message));
+        // fallthrough to image/div fallback
+      }
     }
+
+    // image source (APNG or static) -> try <img> first
+    if(imgExtRE.test(src)){
+      try{
+        const img = document.createElement('img');
+        img.className = 'board-apng';
+        img.src = src;
+        img.alt = opts.alt || 'board';
+        img.draggable = false;
+        img.decoding = 'auto';
+        img.loading = 'eager';
+        img.style.position = 'absolute';
+        img.style.width = size + 'px';
+        img.style.height = size + 'px';
+        img.style.left = tile.x + 'px';
+        img.style.top  = tile.y + 'px';
+        img.style.transform = 'translate(-50%,-50%)';
+        img.style.objectFit = 'cover';
+        img.style.pointerEvents = 'none';
+        img.style.opacity = '0';
+        img.style.zIndex = '110';
+        img.style.willChange = 'opacity,left,top,width,height';
+        dynRoot.appendChild(img);
+
+        // when loaded, ensure visible
+        const onLoad = function(){
+          try{
+            img.removeEventListener('load', onLoad);
+            img.removeEventListener('error', onError);
+            // fade-in
+            img.style.transition = 'opacity 160ms ease-out';
+            img.style.opacity = '1';
+            // register as board
+            state.board = { el: img, tx, ty, fixed: !!opts.fixed };
+          }catch(_){}
+        };
+        const onError = function(){
+          try{
+            img.removeEventListener('load', onLoad);
+            img.removeEventListener('error', onError);
+            // remove broken img
+            try{ img.remove(); }catch(_){}
+            // fallback to .webm if exists
+            const fallback = src.replace(/\.apng$/i, '.webm');
+            if(fallback !== src){
+              // try creating video fallback
+              try{
+                const v2 = document.createElement('video');
+                v2.className = 'board-video static';
+                v2.src = fallback;
+                v2.muted = true;
+                v2.playsInline = true;
+                v2.loop = true;
+                v2.preload = 'auto';
+                v2.style.position = 'absolute';
+                v2.style.width = size + 'px';
+                v2.style.height = size + 'px';
+                v2.style.left = tile.x + 'px';
+                v2.style.top  = tile.y + 'px';
+                v2.style.transform = 'translate(-50%,-50%)';
+                v2.style.pointerEvents = 'none';
+                dynRoot.appendChild(v2);
+                v2.play && v2.play().catch(()=>{});
+                state.board = { el: v2, tx, ty, fixed: !!opts.fixed };
+                return;
+              }catch(_){}
+            }
+            // last-resort: colored div
+            const d = document.createElement('div');
+            d.className = 'board-static';
+            d.style.position = 'absolute';
+            d.style.left = tile.x + 'px';
+            d.style.top = tile.y + 'px';
+            d.style.width = size + 'px';
+            d.style.height = size + 'px';
+            d.style.transform = 'translate(-50%,-50%)';
+            d.style.borderRadius = '8px';
+            d.style.background = 'rgba(0,150,120,0.12)';
+            d.style.border = '2px solid rgba(0,150,120,0.18)';
+            d.style.pointerEvents = 'none';
+            dynRoot.appendChild(d);
+            state.board = { el: d, tx, ty, fixed: true };
+          }catch(_){}
+        };
+
+        img.addEventListener('load', onLoad, { once:true });
+        img.addEventListener('error', onError, { once:true });
+
+        // safety fallback: if load doesn't fire in time (APNG blocked or slow), try fallback after timeout
+        setTimeout(()=>{
+          if(state.board && state.board.el) return; // already registered on load
+          // if image not fully loaded or naturalWidth zero -> attempt fallback webm
+          if(!img.complete || img.naturalWidth === 0){
+            try{ img.remove(); }catch(_){}
+            const fallback = src.replace(/\.apng$/i, '.webm');
+            if(fallback !== src){
+              try{
+                const v3 = document.createElement('video');
+                v3.className = 'board-video static';
+                v3.src = fallback;
+                v3.muted = true;
+                v3.playsInline = true;
+                v3.loop = true;
+                v3.preload = 'auto';
+                v3.style.position = 'absolute';
+                v3.style.width = size + 'px';
+                v3.style.height = size + 'px';
+                v3.style.left = tile.x + 'px';
+                v3.style.top  = tile.y + 'px';
+                v3.style.transform = 'translate(-50%,-50%)';
+                v3.style.pointerEvents = 'none';
+                dynRoot.appendChild(v3);
+                v3.play && v3.play().catch(()=>{});
+                state.board = { el: v3, tx, ty, fixed: !!opts.fixed };
+                return;
+              }catch(_){}
+            }
+            // otherwise fallback to simple div
+            const d2 = document.createElement('div');
+            d2.className = 'board-static';
+            d2.style.position = 'absolute';
+            d2.style.left = tile.x + 'px';
+            d2.style.top = tile.y + 'px';
+            d2.style.width = size + 'px';
+            d2.style.height = size + 'px';
+            d2.style.transform = 'translate(-50%,-50%)';
+            d2.style.borderRadius = '8px';
+            d2.style.background = 'rgba(0,150,120,0.12)';
+            d2.style.border = '2px solid rgba(0,150,120,0.18)';
+            d2.style.pointerEvents = 'none';
+            dynRoot.appendChild(d2);
+            state.board = { el: d2, tx, ty, fixed: true };
+          }
+        }, 600);
+
+        // return early: state.board will be set on load/fallback
+        return state.board;
+      }catch(e){
+        warnOnce('spawnBoardImgErr','spawnBoardAtTile img creation failed: '+(e && e.message));
+        // fall through to div fallback
+      }
+    }
+
+    // last-resort: simple static colored div
+    const d = document.createElement('div');
+    d.className = 'board-static';
+    d.style.position = 'absolute';
+    d.style.left = tile.x + 'px';
+    d.style.top = tile.y + 'px';
+    d.style.width = size + 'px';
+    d.style.height = size + 'px';
+    d.style.transform = 'translate(-50%,-50%)';
+    d.style.borderRadius = '8px';
+    d.style.background = 'rgba(0,150,120,0.12)';
+    d.style.border = '2px solid rgba(0,150,120,0.18)';
+    d.style.pointerEvents = 'none';
+    dynRoot.appendChild(d);
+    state.board = { el: d, tx, ty, fixed: true };
+    return state.board;
   }
 
   // choose a random tile excluding spawn radius, node radius, and direct forward tile
@@ -507,7 +671,10 @@ document.addEventListener('DOMContentLoaded', ()=>{
     let n = startNum;
     function showNext(){
       if(n <= 0){
-        if(countdownModal) countdownModal.style.display = 'none';
+        if(countdownModal) {
+          countdownModal.style.display = 'none';
+          countdownModal.classList.remove('show');
+        }
         if(typeof onComplete === 'function') onComplete();
         return;
       }
@@ -522,8 +689,12 @@ document.addEventListener('DOMContentLoaded', ()=>{
       n--;
       setTimeout(showNext, 900);
     }
-    if(countdownModal) countdownModal.style.display = 'flex';
-    else warnOnce('countdownModalMissing','runCountdown: countdownModal not found.');
+    if(countdownModal){
+      countdownModal.style.display = 'flex';
+      countdownModal.classList.add('show');
+      // ensure transparent background (CSS does majority of work)
+      countdownModal.style.background = 'transparent';
+    } else warnOnce('countdownModalMissing','runCountdown: countdownModal not found.');
     setTimeout(showNext, 120);
   }
 
