@@ -2,13 +2,13 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   // ===== spawnConfig (주석으로 설명) =====
   const spawnConfig = {
-    bucketSrc: '../asset/mvi/bucket_color2.webm',
-    boardSrc:  '../asset/mvi/BOARD_COLOR.apng',
+    bucketSrc: '../asset/mvi/bucket color.png',
+    boardSrc:  '../asset/mvi/board color.png',
     bucketSpawnIntervalMs: 3000,
     bucketLifeMs: 5000,
     bucketCountPerSpawn: 1,
     boardShowOnStart: true,
-    boardScale: 1.0,
+    boardScale: 2,
     boardLoop: false
   };
 
@@ -96,6 +96,34 @@ document.addEventListener('DOMContentLoaded', ()=>{
     for(let j=0;j<=TILES_Y;j++) pixelNodesY[j] = gridTop + j*tileH;
 
     if(hud){ hud.style.display = 'block'; hud.textContent = `tile:${tileW.toFixed(1)}x${tileH.toFixed(1)}px`; }
+
+    /***** board alignment patch: make #game-board match playable tile box exactly *****/
+    if (board) {
+      try {
+        // ensure absolute positioning so left/top/width/height take effect
+        const prevPos = getComputedStyle(board).position;
+        if (prevPos !== 'absolute') board.style.position = 'absolute';
+
+        // set board to cover exactly the playable area (TILES_X x TILES_Y tiles)
+        board.style.left = Math.round(gridLeft) - Math.round(gridLeft)-275 + 'px';
+        board.style.top  = Math.round(gridTop) + 'px';
+        board.style.width  = Math.max(1, Math.round(tileW * TILES_X)) + '%';
+        board.style.height = Math.max(1, Math.round(tileH * TILES_Y))/5 + '%';
+        board.style.transform = 'translate(0,0)'; // clear other transforms
+
+        // align overlay if present
+        if (boardOverlay) {
+          boardOverlay.style.position = 'absolute';
+          boardOverlay.style.left = board.style.left;
+          boardOverlay.style.top  = board.style.top;
+          boardOverlay.style.width  = board.style.width;
+          boardOverlay.style.height = board.style.height;
+          boardOverlay.style.transform = 'translate(0,0)';
+        }
+      } catch (e) {
+        warnOnce('board-align-failed', 'computeGrid board alignment failed: ' + (e && e.message));
+      }
+    }
   }
 
   function nodePos(i,j){ return { x: pixelNodesX[Math.max(0,Math.min(TILES_X,i))], y: pixelNodesY[Math.max(0,Math.min(TILES_Y,j))] }; }
@@ -492,7 +520,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     if(!moving && state.board && state.board.el){
       const r = state.board.el.getBoundingClientRect();
       if(soapScreenX >= r.left && soapScreenX <= r.right && soapScreenY >= r.top && soapScreenY <= r.bottom){
-        triggerGameOver('잎간판에 부딪혔습니다.');
+        triggerGameOver('입간판에 부딪혔습니다.');
         return;
       }
     }
