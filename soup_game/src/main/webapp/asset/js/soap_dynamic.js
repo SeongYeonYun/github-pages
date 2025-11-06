@@ -1,777 +1,293 @@
-document.addEventListener('DOMContentLoaded', ()=>{
+// soap_dynamic.js
+// Dynamic manager for buckets and boards.
+// - places boards at tile center
+// - video boards play once; on 'ended' they are replaced by a static image snapshot (last frame)
+// - collision checks use DOM bounding boxes (soap center vs board/buckets)
+(function(){
+  'use strict';
+  if(window.soapDyn) return;
 
-  // ===== spawnConfig (주석으로 설명) =====
-  const spawnConfig = {
-    bucketSrc: '../asset/mvi/bucket color.png',
-    boardSrc:  '../asset/mvi/board color.png',
-    bucketSpawnIntervalMs: 3000,
-    bucketLifeMs: 5000,
-    bucketCountPerSpawn: 1,
-    boardShowOnStart: true,
-    boardScale: 2,
-    boardLoop: false
-  };
-
-  const _warned = new Set();
-  function warnOnce(key, msg){
-    if(!_warned.has(key)){
-      console.warn(msg);
-      _warned.add(key);
-    }
-  }
-
-  const board = document.getElementById('game-board');
-  const sceneImg = document.getElementById('scene-img');
-  const boardOverlay = document.getElementById('board-overlay');
-  const soup = document.getElementById('soup_item');
-  const dynamicRoot = document.getElementById('dynamic-root');
-  const countdownModal = document.getElementById('countdownModal');
-  const countNumberEl = document.getElementById('countNumber');
-  const pauseBtn = document.getElementById('pauseBtn');
-  const pauseModal = document.getElementById('pauseModal');
-  const resumeBtn = document.getElementById('resumeBtn');
-  const restartBtn = document.getElementById('restartBtn');
-  const gameOverModal = document.getElementById('gameOverModal');
-  const gameOverMsg = document.getElementById('gameOverMsg');
-  const goRestart = document.getElementById('goRestart');
-  const timerEl = document.getElementById('timer');
-  const timerLabel = timerEl ? timerEl.querySelector('.label') : null;
-  const timerFill = timerEl ? timerEl.querySelector('.fill') : null;
-  const hud = document.getElementById('hud');
-
-  if(!board) warnOnce('board-missing', 'Warning: #game-board not found.');
-  if(!sceneImg) warnOnce('sceneimg-missing', 'Warning: #scene-img not found.');
-  if(!soup) warnOnce('soup-missing', 'Warning: #soup_item not found.');
-  if(!dynamicRoot) warnOnce('dynroot-missing', 'Warning: #dynamic-root not found — creating fallback root.');
-  if(!timerEl) warnOnce('timer-missing', 'Warning: #timer not found.');
-  if(timerEl && !timerLabel) warnOnce('timerlabel-missing', 'Warning: .label inside #timer not found.');
-  if(timerEl && !timerFill) warnOnce('timerfill-missing', 'Warning: .fill inside #timer not found.');
-
-  const dynRoot = dynamicRoot || (function(){
-    const e = document.createElement('div');
-    e.id = 'dynamic-root-fallback';
-    e.style.position = 'absolute';
-    e.style.left = '0';
-    e.style.top = '0';
-    document.body.appendChild(e);
-    return e;
-  })();
-
-  // grid
   const TILES_X = 4, TILES_Y = 4;
   const PLAYABLE_BOX = { left:0.17, top:0.14, right:0.83, bottom:0.86 };
-  let pixelNodesX = new Array(TILES_X+1).fill(0);
-  let pixelNodesY = new Array(TILES_Y+1).fill(0);
-  let gridLeft=0, gridTop=0, tileW=0, tileH=0;
-  function computeGrid(){
-    if(!board || !sceneImg){ warnOnce('computeGrid-missing', 'computeGrid aborted: missing board or sceneImg.'); return; }
-    const boardRect = board.getBoundingClientRect();
-    const imgRect = sceneImg.getBoundingClientRect();
-    const naturalW = sceneImg.naturalWidth || imgRect.width;
-    const naturalH = sceneImg.naturalHeight || imgRect.height;
-    if(!naturalW || !naturalH){ warnOnce('natural-dim-zero', 'computeGrid: naturalW/H zero — using display sizes.'); }
-    const displayW = imgRect.width || naturalW;
-    const displayH = imgRect.height || naturalH;
-    const scale = Math.max(displayW/(naturalW||displayW), displayH/(naturalH||displayH));
-    const renderedW = naturalW * scale;
-    const renderedH = naturalH * scale;
-    const extraX = renderedW - displayW, extraY = renderedH - displayH;
-    const imgLeftWindow = imgRect.left - (extraX/2);
-    const imgTopWindow  = imgRect.top  - (extraY/2);
 
-    const boxLeftWin = imgLeftWindow + PLAYABLE_BOX.left * renderedW;
-    const boxRightWin = imgLeftWindow + PLAYABLE_BOX.right * renderedW;
-    const boxTopWin = imgTopWindow + PLAYABLE_BOX.top * renderedH;
-    const boxBottomWin = imgTopWindow + PLAYABLE_BOX.bottom * renderedH;
-
-    gridLeft = boxLeftWin - boardRect.left;
-    const rightLocal = boxRightWin - boardRect.left;
-    gridTop = boxTopWin - boardRect.top;
-    const bottomLocal = boxBottomWin - boardRect.top;
-
-    tileW = Math.max(1, (rightLocal - gridLeft) / TILES_X);
-    tileH = Math.max(1, (bottomLocal - gridTop) / TILES_Y);
-
-    for(let i=0;i<=TILES_X;i++) pixelNodesX[i] = gridLeft + i*tileW;
-    for(let j=0;j<=TILES_Y;j++) pixelNodesY[j] = gridTop + j*tileH;
-
-    if(hud){ hud.style.display = 'block'; hud.textContent = `tile:${tileW.toFixed(1)}x${tileH.toFixed(1)}px`; }
-
-    /***** board alignment patch: make #game-board match playable tile box exactly *****/
-    if (board) {
-      try {
-        // ensure absolute positioning so left/top/width/height take effect
-        const prevPos = getComputedStyle(board).position;
-        if (prevPos !== 'absolute') board.style.position = 'absolute';
-
-        // set board to cover exactly the playable area (TILES_X x TILES_Y tiles)
-        board.style.left = Math.round(gridLeft) - Math.round(gridLeft)-275 + 'px';
-        board.style.top  = Math.round(gridTop) + 'px';
-        board.style.width  = Math.max(1, Math.round(tileW * TILES_X)) + '%';
-        board.style.height = Math.max(1, Math.round(tileH * TILES_Y))/5 + '%';
-        board.style.transform = 'translate(0,0)'; // clear other transforms
-
-        // align overlay if present
-        if (boardOverlay) {
-          boardOverlay.style.position = 'absolute';
-          boardOverlay.style.left = board.style.left;
-          boardOverlay.style.top  = board.style.top;
-          boardOverlay.style.width  = board.style.width;
-          boardOverlay.style.height = board.style.height;
-          boardOverlay.style.transform = 'translate(0,0)';
-        }
-      } catch (e) {
-        warnOnce('board-align-failed', 'computeGrid board alignment failed: ' + (e && e.message));
-      }
+  const state = {
+    buckets: [],
+    board: null,
+    bucketTimer: null,
+    spawnConfig: {
+      bucketSrc: '../asset/mvi/bucket_color.png',
+      boardSrc:  '../asset/mvi/board_color.png',
+      bucketSpawnIntervalMs: 3000,
+      bucketLifeMs: 5000,
+      boardScale: 1.0,
+      boardLoop: false,
+      boardShowOnStart: true
     }
+  };
+
+  function setSpawnConfig(cfg){ Object.assign(state.spawnConfig, cfg||{}); }
+
+  function computeGridLocal(){
+    const board = document.getElementById('game-board');
+    const scene = document.getElementById('scene-img');
+    if(!board || !scene) return null;
+    const br = board.getBoundingClientRect(), sr = scene.getBoundingClientRect();
+    const displayW = sr.width || br.width, displayH = sr.height || br.height;
+    const leftLocal = Math.round(PLAYABLE_BOX.left * displayW);
+    const rightLocal = Math.round(PLAYABLE_BOX.right * displayW);
+    const topLocal = Math.round(PLAYABLE_BOX.top * displayH);
+    const bottomLocal = Math.round(PLAYABLE_BOX.bottom * displayH);
+    const gridLeft = leftLocal, gridTop = topLocal;
+    const tileW = Math.max(1, (rightLocal - leftLocal) / TILES_X);
+    const tileH = Math.max(1, (bottomLocal - topLocal) / TILES_Y);
+    const pixelNodesX = new Array(TILES_X+1).fill(0), pixelNodesY = new Array(TILES_Y+1).fill(0);
+    for(let i=0;i<=TILES_X;i++) pixelNodesX[i] = Math.round(gridLeft + i*tileW);
+    for(let j=0;j<=TILES_Y;j++) pixelNodesY[j] = Math.round(gridTop + j*tileH);
+    return { gridLeft, gridTop, tileW, tileH, pixelNodesX, pixelNodesY, boardRect: br };
   }
 
-  function nodePos(i,j){ return { x: pixelNodesX[Math.max(0,Math.min(TILES_X,i))], y: pixelNodesY[Math.max(0,Math.min(TILES_Y,j))] }; }
-  function tileCenter(tx,ty){ const ti = Math.max(0,Math.min(TILES_X-1,tx)); const tj = Math.max(0,Math.min(TILES_Y-1,ty)); const cx = gridLeft + (ti + 0.5) * tileW; const cy = gridTop + (tj + 0.5) * tileH; return { x: cx, y: cy, w: tileW, h: tileH }; }
-
-  // spawn tile (bottom middle)
-  const spawnTile = { tx: Math.floor(TILES_X/2), ty: Math.max(0, TILES_Y-1) };
-  function tileBottomCenter(tx, ty){
+  function tileCenterLocal(tx,ty){
+    const g = computeGridLocal();
+    if(!g) return { x:0,y:0,w:0,h:0 };
     const ti = Math.max(0, Math.min(TILES_X-1, tx));
     const tj = Math.max(0, Math.min(TILES_Y-1, ty));
-    const x = gridLeft + (ti + 0.5) * tileW;
-    const y = gridTop + (tj + 1) * tileH;
-    return { x, y, w: tileW, h: tileH };
+    const cx = g.gridLeft + (ti + 0.5) * g.tileW;
+    const cy = g.gridTop + (tj + 0.5) * g.tileH;
+    return { x: Math.round(cx), y: Math.round(cy), w: g.tileW, h: g.tileH };
   }
 
-  // player state
-  let node = { i: spawnTile.tx, j: spawnTile.ty };
-  let dir = { x:0, y:-1 }; // face UP initially
-  let queuedDir = null;
-  let moving = false;
-  let lastTs = null;
-  let gameOver = false;
-  let MOVE_EPS = 8;
+  function clearAll(){
+    try{
+      state.buckets.forEach(b=>{ try{ b._to && clearTimeout(b._to); b.el.pause && b.el.pause(); b.el.remove(); }catch(_){} });
+      state.buckets = [];
+      if(state.board && state.board.el) try{ state.board.el.remove(); }catch(_){}
+      state.board = null;
+      if(state.bucketTimer){ clearInterval(state.bucketTimer); state.bucketTimer = null; }
+    }catch(e){ console.warn('soap_dynamic.clearAll err', e); }
+  }
 
-  function placeSoapAtNode(i,j, align){
-    if(!soup){ warnOnce('placeSoapNoSoup', 'placeSoapAtNode: #soup_item missing - skipping.'); return; }
-    if(align === 'bottom'){
-      const t = tileBottomCenter(i,j);
-      const offsetUp = Math.max(6, Math.round(Math.min(tileW, tileH) * 0.18));
-      soup.style.left = t.x + 'px';
-      soup.style.top  = (t.y - offsetUp) + 'px';
-    } else if(align === 'center'){
-      const t = tileCenter(i,j);
-      soup.style.left = t.x + 'px';
-      soup.style.top  = t.y + 'px';
+  function isVideoSrc(src){
+    return /\.(webm|mp4|ogg)$/i.test(src);
+  }
+  function isImageSrc(src){
+    return /\.(png|apng|gif|webp|jpe?g|svg)$/i.test(src);
+  }
+
+  // spawnBucketAt: same as before (image/video/div)
+  function spawnBucketAt(tx,ty, opts){
+    opts = opts || {};
+    const g = computeGridLocal(); if(!g) return null;
+    const tile = tileCenterLocal(tx,ty);
+    const size = Math.round(Math.min(g.tileW, g.tileH) * (opts.scale || 0.9));
+    const src = opts.src || state.spawnConfig.bucketSrc || '';
+    const root = document.getElementById('dynamic-root') || document.body;
+
+    let el = null;
+    if(isVideoSrc(src)){
+      el = document.createElement('video');
+      el.src = src;
+      el.muted = true; el.playsInline = true; el.loop = !!opts.loop;
+      el.preload = 'auto';
+      el.style.width = size + 'px'; el.style.height = size + 'px';
+      el.style.position = 'absolute'; el.style.left = tile.x + 'px'; el.style.top = tile.y + 'px';
+      el.style.transform = 'translate(-50%,-50%)'; el.style.pointerEvents='none'; el.style.zIndex = 1400;
+      root.appendChild(el);
+      el.play && el.play().catch(()=>{});
+    } else if(isImageSrc(src)){
+      el = document.createElement('img');
+      el.src = src;
+      el.draggable = false;
+      el.style.width = size + 'px'; el.style.height = size + 'px';
+      el.style.objectFit = 'cover';
+      el.style.position = 'absolute'; el.style.left = tile.x + 'px'; el.style.top = tile.y + 'px';
+      el.style.transform = 'translate(-50%,-50%)'; el.style.pointerEvents='none'; el.style.zIndex = 1400;
+      root.appendChild(el);
     } else {
-      const p = nodePos(i,j);
-      soup.style.left = p.x + 'px';
-      soup.style.top  = p.y + 'px';
+      el = document.createElement('div');
+      el.style.width = size + 'px'; el.style.height = size + 'px';
+      el.style.position = 'absolute'; el.style.left = tile.x + 'px'; el.style.top = tile.y + 'px';
+      el.style.transform = 'translate(-50%,-50%)'; el.style.background = 'rgba(200,80,40,0.95)';
+      el.style.borderRadius = Math.max(4, size*0.08)+'px';
+      el.style.zIndex = 1400; el.style.pointerEvents='none';
+      root.appendChild(el);
     }
-  }
-  function getSoapCenter(){
-    if(!soup || !board){ warnOnce('getSoapNoElements', 'getSoapCenter: soup or board missing - returning 0,0.'); return { x:0, y:0 }; }
-    const s = soup.getBoundingClientRect();
-    const b = board.getBoundingClientRect();
-    const cx = (s.left + s.right)/2 - b.left;
-    const cy = (s.top + s.bottom)/2 - b.top;
-    return { x: cx, y: cy };
-  }
-  function applyDirection(dx,dy){
-    if(Math.abs(dx)+Math.abs(dy)!==1) return;
-    dir.x = dx; dir.y = dy; queuedDir = null;
-    const angle = Math.atan2(dy,dx)*180/Math.PI;
-    if(soup) soup.style.transform = `translate(-50%,-50%) rotate(${angle}deg)`;
+
+    const obj = { el, tx, ty };
+    state.buckets.push(obj);
+    const life = opts.lifeMs || state.spawnConfig.bucketLifeMs;
+    if(life && life > 0){
+      obj._to = setTimeout(()=>{ try{ obj.el.pause && obj.el.pause(); obj.el.remove(); }catch(_){} state.buckets = state.buckets.filter(x=>x!==obj); }, life);
+    }
+    return obj;
   }
 
-  const state = { buckets: [], board: null, bucketTimer: null };
-
-  function createWarnArea(px, py, w, h, duration=300){
-    const el = document.createElement('div');
-    el.className = 'warn-area';
-    el.style.width = (w||Math.min(tileW,tileH)) + 'px';
-    el.style.height = (h||Math.min(tileW,tileH)) + 'px';
-    el.style.left = px + 'px';
-    el.style.top  = py + 'px';
-    el.style.animation = `warnBlink ${duration}ms linear 1`;
-    dynRoot.appendChild(el);
-    if(duration>0){ setTimeout(()=>{ try{ el.remove(); }catch(_){} }, duration+60); }
-    return el;
-  }
-
-  function spawnBucketAtNode(i,j, opts){
-    if(gameOver) return;
-    opts = opts||{};
-    computeGrid();
-    const soapCenter = getSoapCenter();
-    const nodeP = nodePos(i,j);
-    if(Math.hypot(soapCenter.x - nodeP.x, soapCenter.y - nodeP.y) < Math.min(tileW,tileH)*0.35) return null;
-
-    const size = Math.round(Math.min(tileW,tileH) * (opts.scale || spawnConfig.bucketScale || 1));
-    createWarnArea(nodeP.x, nodeP.y, size, size, 200);
-
-    setTimeout(()=>{
-      const v = document.createElement('video');
-      v.className = 'bucket-video';
-      v.src = opts.src || spawnConfig.bucketSrc;
-      v.muted = true;
-      v.playsInline = true;
-      v.loop = !!(opts.loop !== undefined ? opts.loop : false);
-      v.preload = 'auto';
-      v.style.width = size + 'px';
-      v.style.height = size + 'px';
-      v.style.left = nodeP.x + 'px';
-      v.style.top  = nodeP.y + 'px';
-      v.style.setProperty('--tilt-deg', '0deg');
-      v.style.setProperty('--pop-duration', '360ms');
-      dynRoot.appendChild(v);
-      void v.offsetWidth;
-      v.classList.add('shown');
-
-      v.addEventListener('ended', function onEnded(){
-        try{
-          v.pause();
-          v.classList.remove('shown');
-          v.style.transition = 'none';
-          v.classList.add('static');
-        }catch(_){}
-        try{ v.removeEventListener('ended', onEnded); }catch(_){}
-      }, { once:true });
-
-      v.play().catch(()=>{});
-
-      const bucketObj = { el:v, i,j };
-      state.buckets.push(bucketObj);
-      const lifeMs = (opts.lifeMs !== undefined ? opts.lifeMs : spawnConfig.bucketLifeMs);
-      if(lifeMs && lifeMs>0){
-        bucketObj._removeTimeout = setTimeout(()=>{
-          try{ v.pause(); v.remove(); }catch(_){} 
-          state.buckets = state.buckets.filter(x=>x!==bucketObj);
-        }, lifeMs);
+  function startBucketLoop(){
+    stopBucketLoop();
+    state.bucketTimer = setInterval(()=>{
+      const candidates = [];
+      for(let tx=0; tx<TILES_X; tx++){
+        for(let ty=0; ty<TILES_Y; ty++){
+          if(ty === TILES_Y-1) continue; // avoid bottom-most spawn row
+          candidates.push({tx,ty});
+        }
       }
-    }, 200);
+      if(candidates.length===0) return;
+      const pick = candidates[Math.floor(Math.random()*candidates.length)];
+      spawnBucketAt(pick.tx, pick.ty, { src: state.spawnConfig.bucketSrc, lifeMs: state.spawnConfig.bucketLifeMs, scale: 0.9 });
+    }, Math.max(150, state.spawnConfig.bucketSpawnIntervalMs || 1000));
   }
+  function stopBucketLoop(){ if(state.bucketTimer){ clearInterval(state.bucketTimer); state.bucketTimer = null; } }
 
-  // spawnBoardAtTile: creates a static board (APNG first, webm/div fallback). Returns state.board or false if blocked.
+  // spawnBoardAtTile — centers on tile, plays video once then replaces with snapshot to preserve last frame
   function spawnBoardAtTile(tx,ty, opts){
-    if(gameOver) return;
-    opts = opts||{};
-    computeGrid();
+    opts = opts || {};
+    const tile = tileCenterLocal(tx,ty);
+    const src = opts.src || state.spawnConfig.boardSrc || '';
+    const scale = opts.scale || state.spawnConfig.boardScale || 1.0;
+    const size = Math.round(Math.min(tile.w, tile.h) * (scale || 1));
+    // remove existing board (we want only one at a time)
+    if(state.board && state.board.el){ try{ state.board.el.remove(); }catch(_){} state.board = null; }
+    const root = document.getElementById('dynamic-root') || document.body;
+    let el = null;
 
-    // Block spawn if within spawnTile's 1-tile radius
-    const dxSpawn = Math.abs(tx - spawnTile.tx);
-    const dySpawn = Math.abs(ty - spawnTile.ty);
-    if(dxSpawn <= 1 && dySpawn <= 1){
-      return false;
+    if(isImageSrc(src)){
+      el = document.createElement('img');
+      el.src = src; el.draggable=false;
+      el.style.width = size + 'px'; el.style.height = size + 'px';
+      el.style.objectFit = 'cover';
+      el.style.position = 'absolute'; el.style.left = tile.x + 'px'; el.style.top = tile.y + 'px';
+      el.style.transform = 'translate(-50%,-50%)'; el.style.pointerEvents='none'; el.style.zIndex = 1450;
+      // fade in
+      el.style.opacity = '0'; el.style.transition = 'opacity 160ms ease-out';
+      root.appendChild(el);
+      el.onload = ()=> el.style.opacity = '1';
+      el.onerror = ()=> el.style.opacity = '1';
+      state.board = { el, tx, ty, fixed: !!opts.fixed };
+      return state.board;
     }
 
-    // Also block spawn if within 1 tile of current soap node (to avoid immediate collision / blocking)
-    const dxNode = Math.abs(tx - node.i);
-    const dyNode = Math.abs(ty - node.j);
-    if(dxNode <= 1 && dyNode <= 1){
-      return false;
-    }
+    if(isVideoSrc(src)){
+      el = document.createElement('video');
+      el.src = src;
+      el.muted = true;
+      el.playsInline = true;
+      // ensure we play once — user asked "한번 재생" so loop must be false
+      el.loop = !!(opts.loop !== undefined ? opts.loop : false);
+      el.preload = 'auto';
+      el.style.width = size + 'px'; el.style.height = size + 'px';
+      el.style.objectFit = 'cover';
+      el.style.position = 'absolute'; el.style.left = tile.x + 'px'; el.style.top = tile.y + 'px';
+      el.style.transform = 'translate(-50%,-50%)'; el.style.pointerEvents='none'; el.style.zIndex = 1450;
+      root.appendChild(el);
 
-    // also block directly in front of soap (the very next tile in facing direction)
-    const forwardTx = node.i + dir.x;
-    const forwardTy = node.j + dir.y;
-    if(forwardTx >= 0 && forwardTx < TILES_X && forwardTy >= 0 && forwardTy < TILES_Y){
-      if(tx === forwardTx && ty === forwardTy) return false;
-    }
-
-    const tile = tileCenter(tx,ty);
-    const size = Math.round(Math.min(tileW,tileH) * (opts.scale || spawnConfig.boardScale || 1));
-
-    // cleanup existing board
-    if(state.board && state.board.el){
-      try{ state.board.el.pause && state.board.el.pause(); state.board.el.remove(); }catch(_){} 
-      state.board=null;
-    }
-
-    const srcRaw = (opts.src || spawnConfig.boardSrc || '').toString();
-    const src = srcRaw.trim();
-
-    const imgExtRE = /\.(apng|png|gif|webp|jpe?g|svg)$/i;
-    const vidExtRE = /\.(webm|mp4|ogg)$/i;
-
-    // video source -> create video element
-    if(vidExtRE.test(src)){
-      try{
-        const v = document.createElement('video');
-        v.className = 'board-video static';
-        v.src = src;
-        v.muted = true;
-        v.playsInline = true;
-        v.loop = !!(opts.loop !== undefined ? opts.loop : spawnConfig.boardLoop);
-        v.preload = 'auto';
-        v.style.position = 'absolute';
-        v.style.width = size + 'px';
-        v.style.height = size + 'px';
-        v.style.left = tile.x + 'px';
-        v.style.top  = tile.y + 'px';
-        v.style.transform = 'translate(-50%,-50%)';
-        v.style.setProperty('--tilt-deg', '0deg');
-        v.style.setProperty('--pop-duration', '0ms');
-        v.classList.remove('shown');
-        v.style.transition = 'none';
-        v.style.opacity = '1';
-        v.style.pointerEvents = 'none';
-        dynRoot.appendChild(v);
-        // try play
-        v.play && v.play().catch(()=>{});
-        state.board = { el: v, tx, ty, fixed: !!opts.fixed };
-        return state.board;
-      }catch(e){
-        warnOnce('spawnBoardVideoErr','spawnBoardAtTile video creation failed: '+(e && e.message));
-        // fallthrough to image/div fallback
-      }
-    }
-
-    // image source (APNG or static) -> try <img> first
-    if(imgExtRE.test(src)){
-      try{
-        const img = document.createElement('img');
-        img.className = 'board-apng';
-        img.src = src;
-        img.alt = opts.alt || 'board';
-        img.draggable = false;
-        img.decoding = 'auto';
-        img.loading = 'eager';
-        img.style.position = 'absolute';
-        img.style.width = size + 'px';
-        img.style.height = size + 'px';
-        img.style.left = tile.x + 'px';
-        img.style.top  = tile.y + 'px';
-        img.style.transform = 'translate(-50%,-50%)';
-        img.style.objectFit = 'cover';
-        img.style.pointerEvents = 'none';
-        img.style.opacity = '0';
-        img.style.zIndex = '110';
-        img.style.willChange = 'opacity,left,top,width,height';
-        dynRoot.appendChild(img);
-
-        // when loaded, ensure visible
-        const onLoad = function(){
+      // When ended -> replace with an <img> snapshot so last frame remains visible reliably
+      const onEnded = function(){
+        try{
+          // draw current frame to canvas
+          const cv = document.createElement('canvas');
+          cv.width = el.videoWidth || size;
+          cv.height = el.videoHeight || size;
+          const ctx = cv.getContext('2d');
           try{
-            img.removeEventListener('load', onLoad);
-            img.removeEventListener('error', onError);
-            // fade-in
-            img.style.transition = 'opacity 160ms ease-out';
-            img.style.opacity = '1';
-            // register as board
-            state.board = { el: img, tx, ty, fixed: !!opts.fixed };
-          }catch(_){}
-        };
-        const onError = function(){
-          try{
-            img.removeEventListener('load', onLoad);
-            img.removeEventListener('error', onError);
-            // remove broken img
-            try{ img.remove(); }catch(_){}
-            // fallback to .webm if exists
-            const fallback = src.replace(/\.apng$/i, '.webm');
-            if(fallback !== src){
-              // try creating video fallback
-              try{
-                const v2 = document.createElement('video');
-                v2.className = 'board-video static';
-                v2.src = fallback;
-                v2.muted = true;
-                v2.playsInline = true;
-                v2.loop = true;
-                v2.preload = 'auto';
-                v2.style.position = 'absolute';
-                v2.style.width = size + 'px';
-                v2.style.height = size + 'px';
-                v2.style.left = tile.x + 'px';
-                v2.style.top  = tile.y + 'px';
-                v2.style.transform = 'translate(-50%,-50%)';
-                v2.style.pointerEvents = 'none';
-                dynRoot.appendChild(v2);
-                v2.play && v2.play().catch(()=>{});
-                state.board = { el: v2, tx, ty, fixed: !!opts.fixed };
-                return;
-              }catch(_){}
-            }
-            // last-resort: colored div
-            const d = document.createElement('div');
-            d.className = 'board-static';
-            d.style.position = 'absolute';
-            d.style.left = tile.x + 'px';
-            d.style.top = tile.y + 'px';
-            d.style.width = size + 'px';
-            d.style.height = size + 'px';
-            d.style.transform = 'translate(-50%,-50%)';
-            d.style.borderRadius = '8px';
-            d.style.background = 'rgba(0,150,120,0.12)';
-            d.style.border = '2px solid rgba(0,150,120,0.18)';
-            d.style.pointerEvents = 'none';
-            dynRoot.appendChild(d);
-            state.board = { el: d, tx, ty, fixed: true };
-          }catch(_){}
-        };
-
-        img.addEventListener('load', onLoad, { once:true });
-        img.addEventListener('error', onError, { once:true });
-
-        // safety fallback: if load doesn't fire in time (APNG blocked or slow), try fallback after timeout
-        setTimeout(()=>{
-          if(state.board && state.board.el) return; // already registered on load
-          // if image not fully loaded or naturalWidth zero -> attempt fallback webm
-          if(!img.complete || img.naturalWidth === 0){
-            try{ img.remove(); }catch(_){}
-            const fallback = src.replace(/\.apng$/i, '.webm');
-            if(fallback !== src){
-              try{
-                const v3 = document.createElement('video');
-                v3.className = 'board-video static';
-                v3.src = fallback;
-                v3.muted = true;
-                v3.playsInline = true;
-                v3.loop = true;
-                v3.preload = 'auto';
-                v3.style.position = 'absolute';
-                v3.style.width = size + 'px';
-                v3.style.height = size + 'px';
-                v3.style.left = tile.x + 'px';
-                v3.style.top  = tile.y + 'px';
-                v3.style.transform = 'translate(-50%,-50%)';
-                v3.style.pointerEvents = 'none';
-                dynRoot.appendChild(v3);
-                v3.play && v3.play().catch(()=>{});
-                state.board = { el: v3, tx, ty, fixed: !!opts.fixed };
-                return;
-              }catch(_){}
-            }
-            // otherwise fallback to simple div
-            const d2 = document.createElement('div');
-            d2.className = 'board-static';
-            d2.style.position = 'absolute';
-            d2.style.left = tile.x + 'px';
-            d2.style.top = tile.y + 'px';
-            d2.style.width = size + 'px';
-            d2.style.height = size + 'px';
-            d2.style.transform = 'translate(-50%,-50%)';
-            d2.style.borderRadius = '8px';
-            d2.style.background = 'rgba(0,150,120,0.12)';
-            d2.style.border = '2px solid rgba(0,150,120,0.18)';
-            d2.style.pointerEvents = 'none';
-            dynRoot.appendChild(d2);
-            state.board = { el: d2, tx, ty, fixed: true };
+            ctx.drawImage(el, 0, 0, cv.width, cv.height);
+            const data = cv.toDataURL('image/png');
+            const img = document.createElement('img');
+            img.src = data;
+            img.draggable = false;
+            img.style.width = size + 'px'; img.style.height = size + 'px';
+            img.style.objectFit = 'cover';
+            img.style.position = 'absolute'; img.style.left = tile.x + 'px'; img.style.top = tile.y + 'px';
+            img.style.transform = 'translate(-50%,-50%)'; img.style.pointerEvents='none'; img.style.zIndex = 1450;
+            // replace element
+            try{ el.remove(); }catch(_){}
+            root.appendChild(img);
+            state.board = { el: img, tx, ty, fixed: true };
+          }catch(e){
+            // fallback: leave video element (it should show last frame in many browsers)
+            try{ el.pause(); }catch(_){}
+            state.board = { el: el, tx, ty, fixed: true };
           }
-        }, 600);
+        }catch(e){
+          try{ el.pause(); }catch(_){}
+          state.board = { el: el, tx, ty, fixed: true };
+        } finally {
+          try{ el.removeEventListener('ended', onEnded); }catch(_){}
+        }
+      };
 
-        // return early: state.board will be set on load/fallback
-        return state.board;
-      }catch(e){
-        warnOnce('spawnBoardImgErr','spawnBoardAtTile img creation failed: '+(e && e.message));
-        // fall through to div fallback
-      }
+      el.addEventListener('ended', onEnded, { once:true });
+      // try play (best-effort)
+      el.play().catch(()=>{ /* autoplay might be blocked; still keep element */ });
+      state.board = { el: el, tx, ty, fixed: true };
+      return state.board;
     }
 
-    // last-resort: simple static colored div
-    const d = document.createElement('div');
-    d.className = 'board-static';
-    d.style.position = 'absolute';
-    d.style.left = tile.x + 'px';
-    d.style.top = tile.y + 'px';
-    d.style.width = size + 'px';
-    d.style.height = size + 'px';
-    d.style.transform = 'translate(-50%,-50%)';
-    d.style.borderRadius = '8px';
-    d.style.background = 'rgba(0,150,120,0.12)';
-    d.style.border = '2px solid rgba(0,150,120,0.18)';
-    d.style.pointerEvents = 'none';
-    dynRoot.appendChild(d);
-    state.board = { el: d, tx, ty, fixed: true };
+    // fallback: simple div block
+    el = document.createElement('div');
+    el.style.width = size + 'px'; el.style.height = size + 'px';
+    el.style.position = 'absolute'; el.style.left = tile.x + 'px'; el.style.top = tile.y + 'px';
+    el.style.transform = 'translate(-50%,-50%)'; el.style.background = 'rgba(0,150,120,0.12)';
+    el.style.border = '2px solid rgba(0,150,120,0.18)'; el.style.zIndex = 1450; el.style.pointerEvents='none';
+    root.appendChild(el);
+    state.board = { el, tx, ty, fixed: true };
     return state.board;
   }
 
-  // choose a random tile excluding spawn radius, node radius, and direct forward tile
-  function randomTileIndexAvoidSpawn(){
+  function spawnBoardRandom(opts){
+    opts = opts || {};
+    const avoid = opts.avoid || null;
     const candidates = [];
     for(let tx=0; tx<TILES_X; tx++){
       for(let ty=0; ty<TILES_Y; ty++){
-        const dxSpawn = Math.abs(tx - spawnTile.tx);
-        const dySpawn = Math.abs(ty - spawnTile.ty);
-        if(dxSpawn <= 1 && dySpawn <= 1) continue;
-
-        const dxNode = Math.abs(tx - node.i);
-        const dyNode = Math.abs(ty - node.j);
-        if(dxNode <= 1 && dyNode <= 1) continue;
-
-        const forwardTx = node.i + dir.x;
-        const forwardTy = node.j + dir.y;
-        if(forwardTx >= 0 && forwardTx < TILES_X && forwardTy >= 0 && forwardTy < TILES_Y){
-          if(tx === forwardTx && ty === forwardTy) continue;
+        if(ty === TILES_Y-1) continue; // avoid spawn row
+        if(avoid){
+          const dx = Math.abs(tx - (avoid.i||0));
+          const dy = Math.abs(ty - (avoid.j||0));
+          if(dx <= 1 && dy <= 1) continue;
         }
-
-        candidates.push({ tx, ty });
+        candidates.push({tx,ty});
       }
     }
-    if(candidates.length === 0) return null;
-    return candidates[Math.floor(Math.random()*candidates.length)];
+    if(candidates.length===0) return null;
+    const pick = candidates[Math.floor(Math.random()*candidates.length)];
+    return spawnBoardAtTile(pick.tx, pick.ty, { src: opts.src || state.spawnConfig.boardSrc, scale: opts.scale || state.spawnConfig.boardScale, fixed: true });
   }
 
-  function checkCollisions(){
-    if(gameOver) return;
-    const soap = getSoapCenter();
-    const boardRect = board ? board.getBoundingClientRect() : { left:0, top:0 };
-    const soapScreenX = boardRect.left + soap.x;
-    const soapScreenY = boardRect.top + soap.y;
-
-    // IMPORTANT: while soap is moving, ignore board collision entirely
-    if(!moving && state.board && state.board.el){
-      const r = state.board.el.getBoundingClientRect();
-      if(soapScreenX >= r.left && soapScreenX <= r.right && soapScreenY >= r.top && soapScreenY <= r.bottom){
-        triggerGameOver('입간판에 부딪혔습니다.');
-        return;
+  // collision check: x,y are soap center coords relative to game-board local coords
+  function checkCollision(x,y){
+    if(state.board && state.board.el){
+      try{
+        const br = document.getElementById('game-board').getBoundingClientRect();
+        const r = state.board.el.getBoundingClientRect();
+        const sx = br.left + x, sy = br.top + y;
+        if(sx >= r.left && sx <= r.right && sy >= r.top && sy <= r.bottom) return true;
+      }catch(e){ /* ignore */ }
+    }
+    if(state.buckets && state.buckets.length){
+      const br = document.getElementById('game-board').getBoundingClientRect();
+      for(const b of state.buckets.slice()){
+        if(!b.el) continue;
+        const r = b.el.getBoundingClientRect();
+        const sx = br.left + x, sy = br.top + y;
+        if(sx >= r.left && sx <= r.right && sy >= r.top && sy <= r.bottom) return true;
       }
     }
-
-    for(const b of state.buckets.slice()){
-      if(!b.el) continue;
-      const r = b.el.getBoundingClientRect();
-      if(soapScreenX >= r.left && soapScreenX <= r.right && soapScreenY >= r.top && soapScreenY <= r.bottom){
-        triggerGameOver('대야에 부딪혔습니다.');
-        return;
-      }
-    }
+    return false;
   }
 
-  function startBucketLoop_inner(){
-    stopBucketLoop_inner();
-    state.bucketTimer = setInterval(()=>{
-      computeGrid();
-      for(let attempt=0; attempt<8; attempt++){
-        const {i,j} = randomNodeIndex();
-        const soapCenter = getSoapCenter();
-        const p = nodePos(i,j);
-        if(Math.hypot(soapCenter.x - p.x, soapCenter.y - p.y) < Math.min(tileW,tileH)*0.4) continue;
-        const count = Math.max(1, Math.round(spawnConfig.bucketCountPerSpawn || 1));
-        for(let k=0;k<count;k++) spawnBucketAtNode(i,j,{ lifeMs: spawnConfig.bucketLifeMs, scale: spawnConfig.bucketScale, src: spawnConfig.bucketSrc });
-        break;
-      }
-    }, Math.max(100, spawnConfig.bucketSpawnIntervalMs || 1000));
-  }
-  function stopBucketLoop_inner(){ if(state.bucketTimer){ clearInterval(state.bucketTimer); state.bucketTimer=null; } }
-  function startBucketLoop(){ startBucketLoop_inner(); }
-  function stopBucketLoop(){ stopBucketLoop_inner(); }
-  function startBucketLoop_actual(){ startBucketLoop_inner(); }
-
-  // timer helpers (unchanged)
-  let timerStart = null, timerAccum = 0, timerRunning=false, timerRAF=null;
-  function formatMS(ms){ const s=Math.floor(ms/1000); const mm=Math.floor(s/60).toString().padStart(2,'0'); const ss=(s%60).toString().padStart(2,'0'); return `${mm}:${ss}`; }
-  function startTimer(){ 
-    if(timerRunning) return; 
-    timerRunning=true; 
-    timerStart=performance.now(); 
-    function tick(now){
-      if(!timerRunning) return;
-      const elapsed = timerAccum + (now - timerStart);
-      if (timerLabel) {
-        timerLabel.textContent = formatMS(elapsed);
-      } else {
-        warnOnce('timerLabelMissingDuringTick','startTimer: timerLabel not found — skipping label update.');
-      }
-      if (timerFill) {
-        timerFill.style.width = `${Math.min(100,(elapsed/60000)*100)}%`;
-      } else {
-        warnOnce('timerFillMissingDuringTick','startTimer: timerFill not found — skipping fill update.');
-      }
-      timerRAF = requestAnimationFrame(tick);
-    }
-    timerRAF = requestAnimationFrame(tick);
-  }
-  function pauseTimer(){ 
-    if(!timerRunning) return; 
-    timerRunning=false; 
-    if(timerRAF) cancelAnimationFrame(timerRAF); 
-    timerAccum += performance.now() - (timerStart || performance.now()); 
-  }
-  function resetTimer(){ 
-    timerRunning=false; 
-    if(timerRAF) cancelAnimationFrame(timerRAF); 
-    timerStart=null; timerAccum=0; 
-    if(timerLabel) timerLabel.textContent='00:00'; 
-    if(timerFill) timerFill.style.width='0%'; 
-  }
-
-  function pauseGame(){ 
-    if(gameOver) return; 
-    moving=false; 
-    stopBucketLoop(); 
-    pauseTimer(); 
-    state.buckets.forEach(b=>{ try{ b.el.pause(); }catch(_){} }); 
-    if(state.board&&state.board.el) try{ state.board.el.pause(); }catch(_){} 
-    if(pauseModal){ pauseModal.classList.add('visible'); pauseModal.setAttribute('aria-hidden','false'); } 
-    else warnOnce('pauseModalMissing','pauseGame: pauseModal missing.');
-  }
-  function resumeGame(){ 
-    if(pauseModal){ pauseModal.classList.remove('visible'); pauseModal.setAttribute('aria-hidden','true'); } 
-    state.buckets.forEach(b=>{ try{ b.el.play().catch(()=>{}); }catch(_){} }); 
-    if(state.board&&state.board.el) try{ state.board.el.play().catch(()=>{}); }catch(_){} 
-    startBucketLoop(); 
-    startTimer(); 
-    moving=true; lastTs=null; 
-    if(typeof loop === 'function') requestAnimationFrame(loop); 
-  }
-
-  if(pauseBtn) pauseBtn.addEventListener('click', (e)=>{ e.preventDefault(); pauseGame(); });
-  if(resumeBtn) resumeBtn.addEventListener('click', (e)=>{ e.preventDefault(); resumeGame(); });
-  if(restartBtn) restartBtn.addEventListener('click', (e)=>{ e.preventDefault(); location.reload(); });
-  if(goRestart) goRestart.addEventListener('click', (e)=>{ e.preventDefault(); location.reload(); });
-
-  function triggerGameOver(msg){
-    if(gameOver) return;
-    gameOver=true; moving=false; stopBucketLoop(); pauseTimer();
-    state.buckets.forEach(b=>{ try{ b.el.pause(); }catch(_){} });
-    if(state.board && state.board.el) try{ state.board.el.pause(); }catch(_){} 
-    if(gameOverMsg) gameOverMsg.textContent = msg||'게임 오버'; 
-    if(gameOverModal) gameOverModal.classList.add('visible'); 
-    else warnOnce('gameOverModalMissing','triggerGameOver: gameOverModal missing.');
-  }
-
-  // movement
-  const SPEED = 160;
-  function loop(ts){
-    if(gameOver) return;
-    if(!lastTs) lastTs = ts;
-    const dt = (ts - lastTs)/1000;
-    lastTs = ts;
-    computeGrid();
-    MOVE_EPS = Math.max(6, Math.min(tileW,tileH)*0.16);
-    if(moving){
-      const nextI = node.i + dir.x, nextJ = node.j + dir.y;
-      if(nextI < 0 || nextI > TILES_X || nextJ < 0 || nextJ > TILES_Y){ triggerGameOver('벽에 부딪혔습니다.'); return; }
-      const target = nodePos(nextI,nextJ); const cur = getSoapCenter();
-      const vx = target.x - cur.x, vy = target.y - cur.y;
-      const dist = Math.hypot(vx,vy);
-      if(dist <= MOVE_EPS){
-        node.i = nextI; node.j = nextJ;
-        // place at node center after arriving
-        placeSoapAtNode(node.i,node.j, 'center');
-        // Once arrival happens, collisions with board will be checked again in next iteration (moving===true only during travel)
-        if(queuedDir){
-          const ci = node.i + queuedDir.x, cj = node.j + queuedDir.y;
-          if(!(ci<0||ci>TILES_X||cj<0||cj> TILES_Y)) applyDirection(queuedDir.x, queuedDir.y);
-          queuedDir = null;
-        }
-      } else {
-        const move = Math.min(SPEED * dt, dist);
-        const nx = cur.x + (vx/dist)*move, ny = cur.y + (vy/dist)*move;
-        if(soup){ soup.style.left = nx + 'px'; soup.style.top = ny + 'px'; }
-      }
-    }
-    checkCollisions();
-    requestAnimationFrame(loop);
-  }
-
-  // input wiring (unchanged)
-  const dirMap = { 'UP':{dx:0,dy:-1}, 'RIGHT':{dx:1,dy:0}, 'DOWN':{dx:0,dy:1}, 'LEFT':{dx:-1,dy:0} };
-  ['up','right','down','left'].forEach(id=>{
-    const btn = document.getElementById(id+'-btn');
-    if(!btn) return;
-    btn.addEventListener('pointerdown', e=>{
-      e.preventDefault();
-      const key = id.toUpperCase(); const info = dirMap[key];
-      const cur = getSoapCenter(); const center = nodePos(node.i,node.j);
-      const dist = Math.hypot(cur.x-center.x, cur.y-center.y);
-      if(dist <= MOVE_EPS + 0.5){ applyDirection(info.dx, info.dy); } else { queuedDir = { x: info.dx, y: info.dy }; }
-    }, { passive:false });
-  });
-  window.addEventListener('keydown', function(e){
-    if(!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) return;
-    e.preventDefault();
-    const map = { ArrowUp:'UP', ArrowRight:'RIGHT', ArrowDown:'DOWN', ArrowLeft:'LEFT' }[e.key];
-    const info = dirMap[map];
-    const cur = getSoapCenter(); const center = nodePos(node.i,node.j);
-    const dist = Math.hypot(cur.x-center.x, cur.y-center.y);
-    if(dist <= MOVE_EPS + 0.5){ applyDirection(info.dx, info.dy); } else { queuedDir = { x: info.dx, y: info.dy }; }
-  }, { passive:false });
-
-  // start/flow
-  function afterCountdownStart(){
-    moving = true;
-    lastTs = null;
-    startBucketLoop_actual();
-    startTimer();
-    if(typeof loop === 'function') requestAnimationFrame(loop);
-  }
-
-  function runCountdown(startNum=3, onComplete){
-    let n = startNum;
-    function showNext(){
-      if(n <= 0){
-        if(countdownModal) {
-          countdownModal.style.display = 'none';
-          countdownModal.classList.remove('show');
-        }
-        if(typeof onComplete === 'function') onComplete();
-        return;
-      }
-      if(countNumberEl){
-        countNumberEl.textContent = String(n);
-        countNumberEl.classList.remove('pop');
-        void countNumberEl.offsetWidth;
-        countNumberEl.classList.add('pop');
-      } else {
-        warnOnce('countNumberMissing','runCountdown: countNumberEl not found — skipping visual countdown.');
-      }
-      n--;
-      setTimeout(showNext, 900);
-    }
-    if(countdownModal){
-      countdownModal.style.display = 'flex';
-      countdownModal.classList.add('show');
-      // ensure transparent background (CSS does majority of work)
-      countdownModal.style.background = 'transparent';
-    } else warnOnce('countdownModalMissing','runCountdown: countdownModal not found.');
-    setTimeout(showNext, 120);
-  }
-
-  function initFlow(){
-    computeGrid();
-
-    // place soap at spawn tile bottom-center and face UP (but do not start moving until countdown finished)
-    placeSoapAtNode(spawnTile.tx, spawnTile.ty, 'bottom');
-    applyDirection(0,-1); // face up
-
-    // If configured to show board on start, place a fixed board now (before countdown)
-    if(spawnConfig.boardShowOnStart){
-      const pick = randomTileIndexAvoidSpawn();
-      if(pick){
-        spawnBoardAtTile(pick.tx, pick.ty, { src: spawnConfig.boardSrc, scale: spawnConfig.boardScale, fixed: true });
-      } else {
-        warnOnce('noValidBoardTile', 'initFlow: could not find a valid tile to place board avoiding spawn radius.');
-      }
-    }
-
-    runCountdown(3, ()=>{ afterCountdownStart(); });
-  }
-
-  if(sceneImg && sceneImg.complete) { setTimeout(initFlow, 120); }
-  else if(sceneImg){
-    sceneImg.addEventListener('load', ()=>{ setTimeout(initFlow, 120); }, { once:true });
-    setTimeout(()=>{ if(!sceneImg.complete) initFlow(); }, 800);
-  } else {
-    setTimeout(()=>{
-      warnOnce('noSceneImgInit','No sceneImg element — running initFlow with reduced assumptions.');
-      initFlow();
-    }, 120);
-  }
-
-  window.setSpawnConfig = (opts={})=>{
-    Object.assign(spawnConfig, opts||{});
-    if(state.bucketTimer){ stopBucketLoop(); startBucketLoop_actual(); }
-  };
-  window.clearAll = ()=>{
-    stopBucketLoop();
-    state.buckets.forEach(b=>{ try{ clearTimeout(b._removeTimeout); b.el.pause(); b.el.remove(); }catch(_){} });
-    state.buckets=[];
-    if(state.board && state.board.el){ try{ state.board.el.pause(); state.board.el.remove(); }catch(_){} }
-    state.board=null;
+  window.soapDyn = {
+    _state: state,
+    setSpawnConfig,
+    startBucketLoop,
+    stopBucketLoop,
+    spawnBucketAt,
+    spawnBoardAtTile,
+    spawnBoardRandom,
+    clearAll,
+    checkCollision
   };
 
-  window.addEventListener('resize', ()=>{ computeGrid(); placeSoapAtNode(spawnTile.tx, spawnTile.ty, 'bottom'); });
+  // cleanup
+  window.addEventListener('beforeunload', ()=>{ try{ clearAll(); }catch(_){} });
 
-  function randomNodeIndex(){ return { i: Math.floor(Math.random()*(TILES_X+1)), j: Math.floor(Math.random()*(TILES_Y+1)) }; }
-  function randomTileIndex(){ return { tx: Math.floor(Math.random()*TILES_X), ty: Math.floor(Math.random()*TILES_Y) }; }
-
-}); // DOMContentLoaded
+})();

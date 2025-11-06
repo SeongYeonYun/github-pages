@@ -6,17 +6,19 @@
   <title>Soap Game — Fixed (images/videos visible)</title>
   <link rel="stylesheet" href="../asset/css/soap_game.css">
   <style>
-    /* (경량화된 인라인 스타일은 유지합니다. 전체 스타일은 ../asset/css/soap_game.css로 옮기시길 권장) */
-    *{box-sizing:border-box}
-    html,body{height:100%;margin:0;padding:0;-webkit-font-smoothing:antialiased}
-    body{font-family:"Noto Sans KR",system-ui,-apple-system,"Segoe UI",Roboto;background:linear-gradient(150deg,#cfeffd 0%,#8fd8f4 18%,#6fbff5 55%,#4095f5 100%);color:#052b2f}
-    /* 최소한의 레이아웃 보장 스타일 (원본 CSS가 있다면 파일로 옮겨 주세요) */
-    #game-root{position:relative;width:100%;height:100vh;overflow:hidden;display:flex;flex-direction:column}
-    #header-area{position:relative;width:100%;height:64px;padding:8px 12px;display:flex;align-items:center;gap:12px}
-    #pauseBtn{position:absolute;right:12px;top:12px;width:38px;height:38px;background:transparent;border:0;cursor:pointer;z-index:1000}
-    #timer{position:absolute;top:14px;left:50%;transform:translateX(-50%);width:min(420px,80%);height:22px;border-radius:24px;padding:3px;background:linear-gradient(180deg, rgba(255,255,255,0.16), rgba(0,0,0,0.03));box-shadow:inset 0 2px 6px rgba(0,0,0,0.18);z-index:200}
-    #timer .fill{position:absolute;top:0;left:0;width:0%;height:100%;border-radius:20px;background:#00bcd4;transition:width .3s ease-out}
-    #timer .label{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-weight:700;font-size:12px;color:#053239}
+    /* Small additions for soup spawn/drop and dust */
+    #soup_item { transform-origin:center center; transition: transform 180ms ease-out; }
+    .soup_spawn {
+      animation: soupDrop 420ms cubic-bezier(.2,.9,.2,1) forwards;
+    }
+    @keyframes soupDrop {
+      0% { transform: translate(-50%,-50%) scale(1.6); opacity:0; filter:blur(6px); }
+      60% { transform: translate(-50%,-40%) scale(1.0); opacity:1; filter:blur(0); }
+      100% { transform: translate(-50%,-50%) scale(1.0); opacity:1; }
+    }
+    .dust{ pointer-events:none; position:absolute; border-radius:50%; }
+    .board-apng, .board-video { transition: opacity 160ms ease-out; opacity:0; }
+    .board-apng.shown, .board-video.shown { opacity:1; }
   </style>
 </head>
 <body>
@@ -35,25 +37,25 @@
 
       <div id="dynamic-root" aria-hidden="true"></div>
     </div>
-      <div id="direction-buttons" role="group">
-        <img id="dpad-img" src="../asset/img/BAD.png" alt="dpad">
-        <button id="up-btn" data-dir="UP" aria-label="위"></button>
-        <button id="right-btn" data-dir="RIGHT" aria-label="오른쪽"></button>
-        <button id="down-btn" data-dir="DOWN" aria-label="아래"></button>
-        <button id="left-btn" data-dir="LEFT" aria-label="왼쪽"></button>
-      </div>
+
+    <div id="direction-buttons" role="group">
+      <img id="dpad-img" src="../asset/img/BAD.png" alt="dpad">
+      <button id="up-btn" data-dir="UP" aria-label="위"></button>
+      <button id="right-btn" data-dir="RIGHT" aria-label="오른쪽"></button>
+      <button id="down-btn" data-dir="DOWN" aria-label="아래"></button>
+      <button id="left-btn" data-dir="LEFT" aria-label="왼쪽"></button>
+    </div>
 
   </div>
 
-  <!-- countdown modal -->
-  <div id="countdownModal" class="countdown-modal" role="dialog" aria-modal="true" aria-live="assertive" aria-label="게임 시작 카운트다운" style="display:none">
+  <!-- modals -->
+  <div id="countdownModal" class="countdown-modal" role="dialog" aria-modal="true" style="display:none">
     <div class="countdown-box">
       <div id="countNumber" class="count-number" aria-hidden="true">3</div>
       <div class="count-label">게임 시작까지</div>
     </div>
   </div>
 
-  <!-- pause modal -->
   <div id="pauseModal" class="modal" role="dialog" aria-modal="true" aria-hidden="true">
     <div class="box">
       <h3>일시정지</h3>
@@ -64,7 +66,6 @@
     </div>
   </div>
 
-  <!-- game over modal -->
   <div id="gameOverModal" class="modal" role="dialog" aria-modal="true">
     <div class="box">
       <h2>게임 오버</h2>
@@ -75,14 +76,11 @@
     </div>
   </div>
 
-  <!-- 외부 JS 로드 (의존성 순서를 지켜야 합니다) -->
+  <!-- Scripts: keep order (utils first, obstacles, dynamic, core) -->
   <script src="../asset/js/soap_utils_shim.js"></script>
   <script src="../asset/js/soap_utils_patched.js"></script>
-  <script src="../asset/js/soap_timer.js"></script>
   <script src="../asset/js/soap_obstacles.js"></script>
-  <script src="../asset/js/soap_game_core.js"></script>
-  <!-- 지금 방금 분리한 스크립트 (이 파일을 프로젝트에 저장하세요) -->
   <script src="../asset/js/soap_dynamic.js"></script>
-
+  <script src="../asset/js/soap_game_core.js"></script>
 </body>
 </html>
