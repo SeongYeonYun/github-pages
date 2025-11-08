@@ -602,6 +602,12 @@
     overlay.style.background = 'rgba(255,0,0,0.45)';
     overlay.style.opacity = '0';
     overlay.style.transform = 'none';
+
+    // --- [문제 2 해결] ---
+    // 투명도(opacity)가 부드럽게 변하도록 transition 스타일을 추가합니다.
+    overlay.style.transition = 'opacity 300ms linear';
+    // ---------------------
+    
     overlay._pulseInterval = null;
 
     (boardEl || document.body).appendChild(overlay);
@@ -1189,6 +1195,12 @@
       s.addEventListener('animationend', function onEnd(){
         s.classList.remove('soup_spawn');
         s.classList.add('soup_landed');
+
+        // --- [문제 1 해결] ---
+        // 애니메이션이 끝난 후 강제로 회전 각도를 다시 90도로 설정합니다.
+        s.style.transform = 'translate(-50%,-50%) rotate(90deg)';
+        // ---------------------
+
         const c = nodePos(spawnNode.i, spawnNode.j);
         spawnDustAt(c.x, c.y, 6);
         s.removeEventListener('animationend', onEnd);

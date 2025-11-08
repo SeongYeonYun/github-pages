@@ -56,6 +56,30 @@
     return { x: Math.round(cx), y: Math.round(cy), w: g.tileW, h: g.tileH };
   }
 
+  // --- [문제 3 해결] ---
+  // core 파일의 tileEdgeMid 함수를 dynamic 파일용으로 복사/수정
+  function tileEdgeMidLocal(tx, ty, edge) {
+    const g = computeGridLocal();
+    if (!g) return { x: 0, y: 0 };
+    
+    const ti = Math.max(0, Math.min(TILES_X - 1, tx));
+    const tj = Math.max(0, Math.min(TILES_Y - 1, ty));
+    const cx = g.gridLeft + (ti + 0.5) * g.tileW;
+    const cy = g.gridTop + (tj + 0.5) * g.tileH;
+    const t = { x: Math.round(cx), y: Math.round(cy) };
+
+    if (edge === 'bottom') return { x: t.x, y: Math.round(g.gridTop + (tj + 1) * g.tileH) };
+    if (edge === 'left') return { x: Math.round(g.gridLeft + ti * g.tileW), y: t.y };
+    if (edge === 'right') return { x: Math.round(g.gridLeft + (ti + 1) * g.tileW), y: t.y };
+    if (edge === 'random') {
+      const arr = ['top', 'bottom', 'left', 'right'];
+      return tileEdgeMidLocal(tx, ty, arr[Math.floor(Math.random() * 4)]);
+    }
+    // default top
+    return { x: t.x, y: Math.round(g.gridTop + tj * g.tileH) };
+  }
+  // ---------------------
+
   function clearAll(){
     try{
       state.buckets.forEach(b=>{ try{ b._to && clearTimeout(b._to); b.el.pause && b.el.pause(); b.el.remove(); }catch(_){} });
@@ -77,7 +101,16 @@
   function spawnBucketAt(tx,ty, opts){
     opts = opts || {};
     const g = computeGridLocal(); if(!g) return null;
-    const tile = tileCenterLocal(tx,ty);
+
+    // --- [문제 3 해결] ---
+    // opts에 edge 정보가 있으면 tileEdgeMidLocal을, 없으면 tileCenterLocal을 사용
+    const useEdge = opts.pos === 'edge' && opts.edge;
+    const pos = useEdge
+      ? tileEdgeMidLocal(tx, ty, opts.edge)
+      : tileCenterLocal(tx, ty);
+    // ---------------------
+
+    //const tile = tileCenterLocal(tx,ty);
     const size = Math.round(Math.min(g.tileW, g.tileH) * (opts.scale || 0.9));
     const src = opts.src || state.spawnConfig.bucketSrc || '';
     const root = document.getElementById('dynamic-root') || document.body;
@@ -89,7 +122,9 @@
       el.muted = true; el.playsInline = true; el.loop = !!opts.loop;
       el.preload = 'auto';
       el.style.width = size + 'px'; el.style.height = size + 'px';
-      el.style.position = 'absolute'; el.style.left = tile.x + 'px'; el.style.top = tile.y + 'px';
+      el.style.position = 'absolute';
+      // [수정] tile.x, tile.y 대신 pos.x, pos.y 사용
+      el.style.left = pos.x + 'px'; el.style.top = pos.y + 'px';
       el.style.transform = 'translate(-50%,-50%)'; el.style.pointerEvents='none'; el.style.zIndex = 1400;
       root.appendChild(el);
       el.play && el.play().catch(()=>{});
@@ -99,13 +134,17 @@
       el.draggable = false;
       el.style.width = size + 'px'; el.style.height = size + 'px';
       el.style.objectFit = 'cover';
-      el.style.position = 'absolute'; el.style.left = tile.x + 'px'; el.style.top = tile.y + 'px';
+      el.style.position = 'absolute';
+      // [수정] tile.x, tile.y 대신 pos.x, pos.y 사용
+      el.style.left = pos.x + 'px'; el.style.top = pos.y + 'px';
       el.style.transform = 'translate(-50%,-50%)'; el.style.pointerEvents='none'; el.style.zIndex = 1400;
       root.appendChild(el);
     } else {
       el = document.createElement('div');
       el.style.width = size + 'px'; el.style.height = size + 'px';
-      el.style.position = 'absolute'; el.style.left = tile.x + 'px'; el.style.top = tile.y + 'px';
+      el.style.position = 'absolute';
+      // [수정] tile.x, tile.y 대신 pos.x, pos.y 사용
+      el.style.left = pos.x + 'px'; el.style.top = pos.y + 'px';
       el.style.transform = 'translate(-50%,-50%)'; el.style.background = 'rgba(200,80,40,0.95)';
       el.style.borderRadius = Math.max(4, size*0.08)+'px';
       el.style.zIndex = 1400; el.style.pointerEvents='none';
