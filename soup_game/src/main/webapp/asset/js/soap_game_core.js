@@ -1,4 +1,4 @@
-// soap_game_core.js (updated — avoid adjacent board/bucket + pre-spawn circular warn 2s)
+// soap_game_core.js (edge-spawn + pre-spawn overlay support)
 (function(){
   'use strict';
 
@@ -12,6 +12,7 @@
   const spawnConfig = {
     bucketSrc: '../asset/mvi/bucket_color.png',
     boardSrc:  '../asset/mvi/board_color.png',
+    windowSrc: '../asset/mvi/window_color.png',
     bucketSpawnIntervalMs: 3000,
     bucketLifeMs: 5000,
     bucketCountPerSpawn: 1,
@@ -27,12 +28,15 @@
     }
   };
 
+  // fixed game duration for scheduling (not auto game-over)
+  let GAME_DURATION_MS = 30000;
+
   // pre-spawn warning (ms)
   const PRE_SPAWN_WARN_MS = 2000;
-  // lifecycle pre-remove warning (ms) - kept for bucket lifecycle
+  // lifecycle pre-remove warning (ms) - bucket warns before disappearing
   const WARN_BEFORE_MS = 2000;
 
-  // -------- canvas helpers (kept minimal) --------
+  // -------- canvas/helpers --------
   function ensureCanvas(id, parent){
     let el = document.getElementById(id);
     if(el) return el;
@@ -54,20 +58,14 @@
     ensureCanvas('board-canvas', boardEl);
     ensureCanvas('ui-canvas', boardEl);
   }
-  function getContextSafe(id){
-    refreshCanvases();
-    const c = document.getElementById(id);
-    if(!c) return null;
-    try{ return c.getContext('2d'); }catch(e){ return null; }
-  }
 
-  // -------- small utilities --------
+  // -------- utilities --------
   function warnOnce(key, msg){
     if(!warnOnce._s) warnOnce._s = new Set();
     if(!warnOnce._s.has(key)){ warnOnce._s.add(key); console.warn(msg); }
   }
 
-  // -------- parameters --------
+  // -------- grid params --------
   const MOVE_SPEED = 100; // px / sec
   const TILES_X = 4, TILES_Y = 4;
   const PLAYABLE_BOX = { left:0.17, top:0.14, right:0.83, bottom:0.86 };
@@ -76,7 +74,6 @@
   let pixelNodesY = new Array(TILES_Y+1).fill(0);
   let gridLeft=0, gridTop=0, tileW=0, tileH=0;
 
-  // -------- grid computation --------
   function computeGrid(){
     const board = document.getElementById('game-board');
     const scene = document.getElementById('scene-img');
@@ -114,15 +111,14 @@
     const cy = gridTop + (tj + 0.5) * tileH;
     return { x: Math.round(cx), y: Math.round(cy), w: tileW, h: tileH };
   }
+  // tile edge midpoint helper — **중요: 경계선 위치 반환**
   function tileEdgeMid(tx,ty, edge){
     const t = tileCenter(tx,ty);
     if(edge === 'bottom') return { x: t.x, y: Math.round(gridTop + (ty+1) * tileH) };
     if(edge === 'left')   return { x: Math.round(gridLeft + tx * tileW), y: t.y };
     if(edge === 'right')  return { x: Math.round(gridLeft + (tx+1) * tileW), y: t.y };
-    if(edge === 'random'){
-      const arr = ['top','bottom','left','right'];
-      return tileEdgeMid(tx,ty, arr[Math.floor(Math.random()*4)]);
-    }
+    if(edge === 'random'){ const arr = ['top','bottom','left','right']; return tileEdgeMid(tx,ty, arr[Math.floor(Math.random()*4)]); }
+    // default top
     return { x: t.x, y: Math.round(gridTop + ty * tileH) };
   }
 
@@ -130,7 +126,6 @@
   function soupEl(){ return document.getElementById('soup_item'); }
   function dynamicRoot(){ return document.getElementById('dynamic-root') || document.body; }
 
-  // placeSoapAtNode: position only, do not change aspect. set initial rotate to 90deg
   function placeSoapAtNode(i,j, align){
     const s = soupEl();
     if(!s){ warnOnce('placeSoapNoSoup','placeSoapAtNode: #soup_item missing - skipping.'); return; }
@@ -170,7 +165,7 @@
   // -------- movement state --------
   const spawnNode = { i: Math.floor(TILES_X/2), j: TILES_Y }; // bottom-center
   let node = { i: spawnNode.i, j: spawnNode.j };
-  let dir = { x:0, y:-1 }; // initially face up
+  let dir = { x:0, y:-1 };
   let queuedDir = null;
   let moving = false;
   let lastTs = null;
@@ -188,37 +183,30 @@
     s.style.transform = `translate(-50%,-50%) rotate(${angleDeg}deg)`;
   }
 
-  // -------- helpers for adjacency checks --------
-  // Chebyshev distance (max of dx,dy)
+  // -------- adjacency checks --------
   function tileDistanceChebyshev(a_tx, a_ty, b_tx, b_ty){
     return Math.max(Math.abs(a_tx - b_tx), Math.abs(a_ty - b_ty));
   }
-  // returns true if tile is occupied by board or adjacent (including diagonals) to any board tile
   function isTileTooCloseToBoard(tx, ty){
     try{
       computeGrid();
-      // check DOM boards
       const boards = document.querySelectorAll('.board');
       for(const b of boards){
         const r = b.getBoundingClientRect();
-        // compute board's tile center indexes by reverse mapping: approximate using br left/top
         const br = (document.getElementById('game-board') || document.body).getBoundingClientRect();
         const centerX = Math.round(r.left + (r.width/2) - br.left);
         const centerY = Math.round(r.top + (r.height/2) - br.top);
-        // approximate tile indices
         const txb = Math.floor((centerX - gridLeft) / tileW);
         const tyb = Math.floor((centerY - gridTop) / tileH);
         if(txb >= 0 && txb < TILES_X && tyb >= 0 && tyb < TILES_Y){
           if(tileDistanceChebyshev(tx,ty, txb, tyb) <= 1) return true;
         } else {
-          // fallback: if tile center lies inside board rect (more exact)
           const t = tileCenter(tx,ty);
           const absX = (document.getElementById('game-board') || document.body).getBoundingClientRect().left + t.x;
           const absY = (document.getElementById('game-board') || document.body).getBoundingClientRect().top + t.y;
           if(absX >= r.left && absX <= r.right && absY >= r.top && absY <= r.bottom) return true;
         }
       }
-      // check soapDyn._state.boards (structured entries)
       if(window.soapDyn && window.soapDyn._state && Array.isArray(window.soapDyn._state.boards)){
         for(const b of window.soapDyn._state.boards.slice()){
           const el = (b && b.el) ? b.el : (b && b.element) ? b.element : null;
@@ -242,10 +230,8 @@
     }catch(e){}
     return false;
   }
-  // returns true if tile is adjacent/overlap to any existing bucket
   function isTileTooCloseToBucket(tx, ty){
     try{
-      // check DOM .bucket
       const br = (document.getElementById('game-board') || document.body).getBoundingClientRect();
       const buckets = document.querySelectorAll('.bucket');
       for(const b of buckets){
@@ -263,7 +249,6 @@
           if(absX >= r.left && absX <= r.right && absY >= r.top && absY <= r.bottom) return true;
         }
       }
-      // check soapDyn._state.buckets
       if(window.soapDyn && window.soapDyn._state && Array.isArray(window.soapDyn._state.buckets)){
         for(const b of window.soapDyn._state.buckets.slice()){
           const el = (b && b.el) ? b.el : (b && b.element) ? b.element : null;
@@ -287,17 +272,15 @@
     }catch(e){}
     return false;
   }
-  // unified check: true if spawning at (tx,ty) would be invalid (too close to board or bucket)
   function isTileInvalidForBucket(tx,ty){
     if(tx < 0 || ty < 0 || tx >= TILES_X || ty >= TILES_Y) return true;
-    // avoid bottom spawn row
     if(ty === TILES_Y-1) return true;
     if(isTileTooCloseToBoard(tx,ty)) return true;
     if(isTileTooCloseToBucket(tx,ty)) return true;
     return false;
   }
 
-  // -------- collision checking (delegate to soapDyn + DOM) --------
+  // -------- collisions + clear check --------
   function rectsIntersectSimple(r1, r2){
     return !(r2.left > r1.right ||
              r2.right < r1.left ||
@@ -348,11 +331,25 @@
           }
         }
       }
+
+      const wnd = document.querySelector('.game-window');
+      if(wnd){
+        const wr = wnd.getBoundingClientRect();
+        const wcx = wr.left + wr.width/2;
+        const wcy = wr.top + wr.height/2;
+        const clearRadius = Math.max(12, Math.min(wr.width, wr.height) * 0.25);
+        const dist = Math.hypot(sx - wcx, sy - wcy);
+        if(dist <= clearRadius){
+          triggerGameClear('창문으로 탈출했습니다! 게임 클리어!');
+          return;
+        }
+      }
+
     }catch(e){}
   }
 
   // -----------------------
-  // CENTERED BUCKET HELPERS (and lifecycle warning)
+  // bucket creation & lifecycle
   // -----------------------
   function alignElementCenterAt(el, x, y, tryCount = 0){
     const ow = el.offsetWidth;
@@ -376,10 +373,8 @@
     requestAnimationFrame(()=> alignElementCenterAt(el, x, y, tryCount + 1));
   }
 
-  // lifecycle attach (bucket lives then removed). warns before removal
   function attachWarningToEl(el, lifeMs){
     if(!el) return;
-    // cleanup existing
     if(el._bucketTimers){
       try{ clearTimeout(el._bucketTimers.warnTimeout); }catch(_){} 
       try{ clearTimeout(el._bucketTimers.removeTimeout); }catch(_){}
@@ -444,7 +439,6 @@
       try{ el._bucketWarning.overlay.remove(); }catch(_){}
       el._bucketWarning = null;
     }
-    // also remove any preSpawn overlay container stored
     if(el._preSpawnOverlay){
       try{ clearTimeout(el._preSpawnOverlay.removeTimeout); }catch(_){}
       try{ el._preSpawnOverlay.el.remove(); }catch(_){}
@@ -452,7 +446,6 @@
     }
   }
 
-  // create bucket DOM, center it at (x,y), attach lifecycle warn
   function createBucketDOMAtXY(x,y, options){
     const boardEl = document.getElementById('game-board');
     const root = boardEl || dynamicRoot();
@@ -479,11 +472,8 @@
       v.style.display = 'block';
       v.style.maxWidth = Math.max(24, Math.min(64, tileW * 0.9)) + 'px';
       v.style.maxHeight = Math.max(24, Math.min(64, tileH * 0.9)) + 'px';
-      v.style.width = 'auto';
-      v.style.height = 'auto';
       el.appendChild(v);
       root.appendChild(el);
-
       const tryAlign = ()=> alignElementCenterAt(el, x, y);
       if(v.readyState >= 2){ tryAlign(); }
       else {
@@ -500,7 +490,6 @@
       img.style.maxHeight = Math.max(24, Math.min(64, tileH * 0.9)) + 'px';
       el.appendChild(img);
       root.appendChild(el);
-
       const tryAlign = ()=> alignElementCenterAt(el, x, y);
       if(img.complete && img.naturalWidth){ tryAlign(); }
       else img.addEventListener('load', tryAlign, { once:true });
@@ -509,12 +498,10 @@
 
     attachWarningToEl(el, lifeMs);
 
-    // register in soapDyn state for checks
     window.soapDyn._state = window.soapDyn._state || {};
     window.soapDyn._state.buckets = window.soapDyn._state.buckets || [];
     window.soapDyn._state.buckets.push({ el });
 
-    console.debug('[soap_core] createBucketDOMAtXY -> appended bucket (will align center)', { x, y, options, lifeMs });
     return { el };
   }
 
@@ -560,7 +547,6 @@
 
   if(!window.soapDyn) window.soapDyn = {};
 
-  // fallback spawnBucketAt uses createBucketDOMAtXY
   if(typeof window.soapDyn.spawnBucketAt !== 'function'){
     window.soapDyn.spawnBucketAt = function(tx, ty, opts){
       computeGrid();
@@ -584,9 +570,7 @@
       for(let tx=0; tx<TILES_X; tx++){
         for(let ty=0; ty<TILES_Y; ty++){
           if(ty === TILES_Y-1) continue;
-          // avoid being adjacent to spawn node
           if(opts && opts.avoid && opts.avoid.i === tx && opts.avoid.j === ty) continue;
-          // ensure board is not adjacent to existing buckets
           if(isTileTooCloseToBucket(tx,ty)) continue;
           candidates.push({tx,ty});
         }
@@ -597,41 +581,14 @@
     };
   }
 
-  // -------- check whether a tile hosts or is adjacent to board/bucket --------
-  function isTileOccupiedByBoard(tx, ty){
-    try{
-      computeGrid();
-      const t = tileCenter(tx,ty);
-      const boards = document.querySelectorAll('.board');
-      for(const b of boards){
-        const r = b.getBoundingClientRect();
-        const absX = (document.getElementById('game-board') || document.body).getBoundingClientRect().left + t.x;
-        const absY = (document.getElementById('game-board') || document.body).getBoundingClientRect().top + t.y;
-        if(absX >= r.left && absX <= r.right && absY >= r.top && absY <= r.bottom) return true;
-      }
-      if(window.soapDyn && window.soapDyn._state && Array.isArray(window.soapDyn._state.boards)){
-        for(const b of window.soapDyn._state.boards.slice()){
-          const el = (b && b.el) ? b.el : (b && b.element) ? b.element : null;
-          if(!el) continue;
-          const r = el.getBoundingClientRect();
-          const absX = (document.getElementById('game-board') || document.body).getBoundingClientRect().left + t.x;
-          const absY = (document.getElementById('game-board') || document.body).getBoundingClientRect().top + t.y;
-          if(absX >= r.left && absX <= r.right && absY >= r.top && absY <= r.bottom) return true;
-        }
-      }
-    }catch(e){}
-    return false;
-  }
-
-  // -------- PRE-SPAWN WARNING UI --------
-  // Create a red circular blinking overlay at tile position (tile edge midpoint or center).
+  // -------- PRE-SPAWN WARNING UI (edge-based) --------
   function showPreSpawnWarningAtTile(tx, ty, opts){
     opts = opts || {};
     const boardEl = document.getElementById('game-board') || document.body;
     computeGrid();
+    // IMPORTANT: default to edge position (not center)
     const pos = (opts.pos === 'center') ? tileCenter(tx,ty) : tileEdgeMid(tx,ty, opts.edge || 'top');
 
-    // container for overlay - attached to board so coordinates align
     const overlay = document.createElement('div');
     overlay.className = 'pre-spawn-warning';
     overlay.style.position = 'absolute';
@@ -644,36 +601,30 @@
     overlay.style.boxSizing = 'content-box';
     overlay.style.background = 'rgba(255,0,0,0.45)';
     overlay.style.opacity = '0';
-    // use transform none and set left/top via alignElementCenterAt
     overlay.style.transform = 'none';
-    // store for cleanup
     overlay._pulseInterval = null;
 
     (boardEl || document.body).appendChild(overlay);
     alignElementCenterAt(overlay, pos.x, pos.y);
 
-    // pulse
     let on = false;
     overlay._pulseInterval = setInterval(()=>{ on = !on; overlay.style.opacity = on ? '1' : '0.25'; }, 330);
 
-    // scheduled removal (in case spawn not executed)
-    const removeTimeout = setTimeout(()=>{
-      try{
-        if(overlay._pulseInterval) clearInterval(overlay._pulseInterval);
-        overlay.remove();
-      }catch(_){}
-    }, PRE_SPAWN_WARN_MS + 150); // small cushion
+    const removeTimeout = setTimeout(()=>{ try{ if(overlay._pulseInterval) clearInterval(overlay._pulseInterval); overlay.remove(); }catch(_){ } }, PRE_SPAWN_WARN_MS + 150);
 
-    // return object to allow cancel and immediate spawn
-    return { el: overlay, removeTimeout, cancel: ()=>{
-      try{ if(overlay._pulseInterval) clearInterval(overlay._pulseInterval); }catch(_){}
-      try{ clearTimeout(removeTimeout); }catch(_){}
-      try{ overlay.remove(); }catch(_){}
-    }};
+    return { el: overlay, removeTimeout, cancel: ()=>{ try{ if(overlay._pulseInterval) clearInterval(overlay._pulseInterval); }catch(_){ } try{ clearTimeout(removeTimeout); }catch(_){ } try{ overlay.remove(); }catch(_){ } } };
   }
 
-  // -------- spawnOnPath with pre-warn support --------
-  // If opts.preWarnMs provided (default PRE_SPAWN_WARN_MS), show warnings then spawn.
+  // helper: decide tile edge based on movement direction
+  function getEdgeForDirection(dx, dy){
+    if(dx === 1) return 'left';
+    if(dx === -1) return 'right';
+    if(dy === 1) return 'top';
+    if(dy === -1) return 'bottom';
+    return 'top';
+  }
+
+  // -------- spawnBucketOnPath (keeps pre-warn) --------
   window.spawnBucketOnPath = function(spawnCount, opts){
     spawnCount = Math.max(1, Math.floor(spawnCount||1));
     opts = opts || {};
@@ -683,7 +634,6 @@
 
     const doSpawn = (tiles) => {
       for(const pick of tiles){
-        // double-check tile validity at spawn time
         if(isTileInvalidForBucket(pick.tx, pick.ty)) continue;
         const edge = getEdgeForDirection(dir.x, dir.y);
         const spawnOpts = Object.assign({ pos:'edge', edge: edge, src: spawnConfig.bucketSrc, lifeMs: spawnConfig.bucketLifeMs }, opts || {});
@@ -692,7 +642,6 @@
     };
 
     if(!path || path.length === 0){
-      // fallback area near ahead node
       const fallbackI = node.i + (dir.x || 0), fallbackJ = node.j + (dir.y || -1);
       const candidates = [];
       for(let rx = Math.max(0,fallbackI-1); rx <= Math.min(TILES_X-1,fallbackI+1); rx++){
@@ -701,23 +650,19 @@
         }
       }
       if(candidates.length === 0) return;
-      // choose spawnCount picks
       const picks = [];
       while(picks.length < spawnCount && candidates.length > 0){
         const idx = Math.floor(Math.random()*candidates.length);
         picks.push(candidates.splice(idx,1)[0]);
       }
-      // show pre-warn overlays then spawn
       const overlays = [];
       for(const p of picks) overlays.push(showPreSpawnWarningAtTile(p.tx, p.ty, { pos: 'edge', edge: getEdgeForDirection(dir.x,dir.y) }));
       setTimeout(()=>{ for(const ov of overlays) { try{ ov.cancel(); }catch(_){}}; doSpawn(picks); }, preWarnMs);
       return;
     }
 
-    // filter out too-close tiles (to board/bucket) and not bottom row
     const candidates = path.filter(p => !isTileInvalidForBucket(p.tx, p.ty));
     if(candidates.length === 0) return;
-    // weighted preference for nearer tiles
     const weighted = [];
     for(let i=0;i<candidates.length;i++){
       const rep = Math.max(1, Math.floor((candidates.length - i)/1));
@@ -727,38 +672,25 @@
     while(picks.length < spawnCount && weighted.length > 0){
       const idx = Math.floor(Math.random()*weighted.length);
       const pick = weighted.splice(idx,1)[0];
-      // remove duplicates
       for(let w=weighted.length-1; w>=0; w--){
         if(weighted[w].tx === pick.tx && weighted[w].ty === pick.ty) weighted.splice(w,1);
       }
       picks.push(pick);
     }
 
-    // show pre-warn overlays, then spawn after preWarnMs
     const overlays = [];
     for(const p of picks){
       overlays.push(showPreSpawnWarningAtTile(p.tx, p.ty, { pos: 'edge', edge: getEdgeForDirection(dir.x,dir.y) }));
     }
     setTimeout(()=>{
-      // remove overlays and actual spawn
       for(const ov of overlays){ try{ ov.cancel(); }catch(_){} }
       doSpawn(picks);
     }, preWarnMs);
   };
 
-  // helper: decide which tile edge corresponds to current movement direction
-  function getEdgeForDirection(dx, dy){
-    if(dx === 1) return 'left';
-    if(dx === -1) return 'right';
-    if(dy === 1) return 'top';
-    if(dy === -1) return 'bottom';
-    return 'top';
-  }
-
   // -------- spawnInitialBuckets uses pre-warn as well --------
   function spawnInitialBuckets(count = 1){
     computeGrid();
-    // prefer path tiles
     const pathTiles = getPathTiles(Math.max(TILES_X, TILES_Y));
     const used = new Set();
     const picks = [];
@@ -772,7 +704,6 @@
       used.add(key);
       picks.push(p);
     }
-    // fill with random safe candidates if needed
     if(picks.length < count){
       const candidates = [];
       for(let tx=0; tx<TILES_X; tx++){
@@ -791,7 +722,6 @@
       }
     }
     if(picks.length === 0) return;
-    // show pre-warn overlays then spawn after PRE_SPAWN_WARN_MS
     const overlays = [];
     for(const p of picks) overlays.push(showPreSpawnWarningAtTile(p.tx, p.ty, { pos:'edge', edge: getEdgeForDirection(dir.x,dir.y) }));
     setTimeout(()=>{
@@ -804,41 +734,80 @@
     }, PRE_SPAWN_WARN_MS);
   }
 
-  // debug / external API to spawn at tile (keeps previous signature)
+  // -------- spawnBucketAtTile: edge-only default + preWarn scheduling --------
+  // NOTE: If opts.preWarnMs > 0, this will schedule the spawn and return { scheduled:true, cancel:fn }.
+  // If preWarnMs is 0 (or omitted), spawn happens immediately and {el} is returned (synchronous).
   window.spawnBucketAtTile = function(tx, ty, opts){
     computeGrid();
     opts = opts || {};
-    // refuse spawn if tile has board or is adjacent to board/bucket
+    // ensure spawn is on edge by default (not center)
+    const edge = opts.edge || getEdgeForDirection(dir.x, dir.y) || 'top';
+    const pos = tileEdgeMid(tx, ty, edge);
+
+    // refuse if tile invalid (adjacent to board/bucket or bottom row)
     if(isTileInvalidForBucket(tx,ty)){
       return null;
     }
-    if(window.soapDyn && typeof window.soapDyn.spawnBucketAt === 'function'){
-      try{
-        // delegate to soapDyn if available; if returns DOM element align + attach lifecycle warn
-        const res = window.soapDyn.spawnBucketAt(tx, ty, opts);
-        if(res && res.el && res.el instanceof HTMLElement){
-          const pos = (opts.pos === 'center') ? tileCenter(tx,ty) : tileEdgeMid(tx,ty, opts.edge || getEdgeForDirection(dir.x, dir.y) || 'top');
-          alignElementCenterAt(res.el, pos.x, pos.y);
-          const lifeMs = (opts && typeof opts.lifeMs === 'number') ? opts.lifeMs : spawnConfig.bucketLifeMs;
-          attachWarningToEl(res.el, lifeMs);
-          // register in state if not present
-          window.soapDyn._state = window.soapDyn._state || {}; window.soapDyn._state.buckets = window.soapDyn._state.buckets || [];
-          window.soapDyn._state.buckets.push({ el: res.el });
+
+    const preWarnMs = (typeof opts.preWarnMs === 'number') ? opts.preWarnMs : 0;
+    // If caller provided a soapDyn implementation, prefer delegating spawn immediately when no preWarn requested.
+    if(preWarnMs > 0){
+      // show overlay, schedule spawn
+      const overlayObj = showPreSpawnWarningAtTile(tx, ty, { pos: 'edge', edge: edge });
+      const timeoutId = setTimeout(()=>{
+        try{
+          overlayObj.cancel && overlayObj.cancel();
+        }catch(_){}
+        // delegate to soapDyn.spawnBucketAt if present (we align afterwards)
+        try{
+          if(window.soapDyn && typeof window.soapDyn.spawnBucketAt === 'function'){
+            const res = window.soapDyn.spawnBucketAt(tx, ty, Object.assign({}, opts, { pos:'edge', edge: edge, src: opts.src || spawnConfig.bucketSrc, lifeMs: opts.lifeMs || spawnConfig.bucketLifeMs }));
+            if(res && res.el && res.el instanceof HTMLElement){
+              alignElementCenterAt(res.el, pos.x, pos.y);
+              attachWarningToEl(res.el, opts.lifeMs || spawnConfig.bucketLifeMs);
+              window.soapDyn._state = window.soapDyn._state || {}; window.soapDyn._state.buckets = window.soapDyn._state.buckets || [];
+              window.soapDyn._state.buckets.push({ el: res.el });
+            }
+            return;
+          }
+        }catch(e){ console.warn('soapDyn.spawnBucketAt threw, falling back', e); }
+        // fallback create
+        try{
+          createBucketDOMAtXY(pos.x, pos.y, Object.assign({}, opts, { pos:'edge', edge: edge }));
+        }catch(e){ console.warn('createBucketDOMAtXY failed', e); }
+      }, preWarnMs);
+
+      return {
+        scheduled: true,
+        cancel: function(){
+          try{ clearTimeout(timeoutId); }catch(_){}
+          try{ overlayObj.cancel && overlayObj.cancel(); }catch(_){}
         }
-        return res;
-      }catch(e){
-        console.warn('spawnBucketAtTile: soapDyn.spawnBucketAt threw', e);
+      };
+    } else {
+      // immediate spawn (synchronous)
+      if(window.soapDyn && typeof window.soapDyn.spawnBucketAt === 'function'){
+        try{
+          const res = window.soapDyn.spawnBucketAt(tx, ty, Object.assign({}, opts, { pos:'edge', edge: edge, src: opts.src || spawnConfig.bucketSrc, lifeMs: opts.lifeMs || spawnConfig.bucketLifeMs }));
+          if(res && res.el && res.el instanceof HTMLElement){
+            alignElementCenterAt(res.el, pos.x, pos.y);
+            attachWarningToEl(res.el, opts.lifeMs || spawnConfig.bucketLifeMs);
+            window.soapDyn._state = window.soapDyn._state || {}; window.soapDyn._state.buckets = window.soapDyn._state.buckets || [];
+            window.soapDyn._state.buckets.push({ el: res.el });
+          }
+          return res;
+        }catch(e){
+          console.warn('spawnBucketAtTile: soapDyn.spawnBucketAt threw', e);
+        }
       }
+      return createBucketDOMAtXY(pos.x, pos.y, Object.assign({}, opts, { pos:'edge', edge: edge }));
     }
-    const pos = (opts.pos === 'center') ? tileCenter(tx,ty) : tileEdgeMid(tx,ty, opts.edge || getEdgeForDirection(dir.x, dir.y) || 'top');
-    return createBucketDOMAtXY(pos.x, pos.y, opts);
   };
 
-  // spawn board at tile center — ensure not adjacent to buckets
+  // -------- spawn board at tile center — ensure not adjacent to buckets --------
   window.spawnBoardAtTile = function(tx, ty, opts){
     computeGrid();
     opts = opts || {};
-    // refuse spawn if tile is adjacent to existing buckets
     if(isTileTooCloseToBucket(tx,ty)){
       return null;
     }
@@ -857,7 +826,6 @@
     if(_bucketLoopId) return;
     _bucketLoopId = setInterval(()=>{
       try{
-        // use pre-warn variant
         window.spawnBucketOnPath(spawnConfig.bucketCountPerSpawn, { edge:getEdgeForDirection(dir.x,dir.y), src: spawnConfig.bucketSrc, lifeMs: spawnConfig.bucketLifeMs, preWarnMs: PRE_SPAWN_WARN_MS });
       }catch(e){
         console.warn('ourStartBucketLoop error', e);
@@ -889,15 +857,148 @@
     }
   }
 
-  // -------- timer & gameover --------
+  // -------- window scheduling & soap bubble (kept from previous) --------
+  let _windowSchedule = { showTimeout: null, bubbleTimeout: null, bubbleAutoRemove: null, windowEl: null, scheduledOpenMs: null };
+  function getMediaDurationSeconds(src, cb){
+    cb = cb || function(){};
+    if(!src) return cb(0);
+    const isVideo = /\.(mp4|webm|mov|m4v)$/i.test(src);
+    if(!isVideo) { cb(0); return; }
+    try{
+      const v = document.createElement('video');
+      v.preload = 'metadata';
+      v.src = src;
+      const onMeta = function(){ const d = Number(v.duration) || 0; cleanup(); cb(d); };
+      const onErr = function(){ cleanup(); cb(0); };
+      function cleanup(){ v.removeEventListener('loadedmetadata', onMeta); v.removeEventListener('error', onErr); try{ v.src = ''; }catch(_){} }
+      v.addEventListener('loadedmetadata', onMeta, { once:true });
+      v.addEventListener('error', onErr, { once:true });
+      setTimeout(()=>{ try{ cleanup(); }catch(_){}; }, 4000);
+    }catch(e){ cb(0); }
+  }
+  function spawnWindowAtTopCenter(opts){
+    opts = opts || {};
+    computeGrid();
+    const boardEl = document.getElementById('game-board') || document.body;
+    const midX = Math.floor(TILES_X/2);
+    const t = tileCenter(midX, 0);
+    const px = t.x;
+    const py = Math.max(8, Math.round(gridTop - tileH * 0.35));
+    const cont = document.createElement('div');
+    cont.className = 'game-window';
+    cont.style.position = 'absolute';
+    cont.style.left = px + 'px';
+    cont.style.top  = py + 'px';
+    cont.style.transform = 'translate(-50%,-50%)';
+    cont.style.pointerEvents = 'none';
+    cont.style.zIndex = 1800;
+    const src = opts.src || spawnConfig.windowSrc;
+    const isVideo = /\.(mp4|webm|mov|m4v)$/i.test(src);
+    if(isVideo){
+      const v = document.createElement('video');
+      v.src = src;
+      v.autoplay = true;
+      v.muted = true;
+      v.playsInline = true;
+      v.loop = false;
+      v.style.display = 'block';
+      const maxW = Math.round(tileW * 1.6), maxH = Math.round(tileH * 1.2);
+      v.style.maxWidth = Math.max(48, Math.min(256, maxW)) + 'px';
+      v.style.maxHeight = Math.max(24, Math.min(256, maxH)) + 'px';
+      v.addEventListener('ended', ()=>{ try{ v.pause(); }catch(_){} });
+      cont.appendChild(v);
+    } else {
+      const img = document.createElement('img');
+      img.src = src || spawnConfig.windowSrc || '../asset/img/window_color.png';
+      img.alt = 'window';
+      img.style.display = 'block';
+      img.style.maxWidth = Math.round(tileW * 1.6) + 'px';
+      img.style.maxHeight = Math.round(tileH * 1.2) + 'px';
+      cont.appendChild(img);
+    }
+    (boardEl || document.body).appendChild(cont);
+    return cont;
+  }
+
+  function showSoapBubble(text){
+    try{
+      const s = soupEl();
+      if(!s) return;
+      if(!_soapBubbleEl){
+        _soapBubbleEl = document.createElement('div');
+        _soapBubbleEl.className = 'soap-bubble';
+        _soapBubbleEl.style.position = 'absolute';
+        _soapBubbleEl.style.pointerEvents = 'none';
+        _soapBubbleEl.style.zIndex = 2000;
+        _soapBubbleEl.style.transform = 'translate(-50%,-120%)';
+        _soapBubbleEl.style.padding = '6px 10px';
+        _soapBubbleEl.style.borderRadius = '10px';
+        _soapBubbleEl.style.fontSize = '12px';
+        _soapBubbleEl.style.background = 'rgba(255,255,255,0.95)';
+        _soapBubbleEl.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+        _soapBubbleEl.style.color = '#052b2f';
+        _soapBubbleEl.style.whiteSpace = 'nowrap';
+        document.body.appendChild(_soapBubbleEl);
+      }
+      _soapBubbleEl.textContent = text || '';
+      const sr = s.getBoundingClientRect();
+      _soapBubbleEl.style.left = (sr.left + sr.width/2) + 'px';
+      _soapBubbleEl.style.top  = (sr.top - 8) + 'px';
+      _soapBubbleEl.style.opacity = '1';
+      if(_soapBubbleEl._autoHideTimer) clearTimeout(_soapBubbleEl._autoHideTimer);
+      _soapBubbleEl._autoHideTimer = setTimeout(()=>{ hideSoapBubble(); }, 5000);
+    }catch(e){ console.warn('showSoapBubble failed', e); }
+  }
+  function hideSoapBubble(){
+    try{
+      if(!_soapBubbleEl) return;
+      if(_soapBubbleEl._autoHideTimer) clearTimeout(_soapBubbleEl._autoHideTimer);
+      _soapBubbleEl.style.opacity = '0';
+      setTimeout(()=>{ try{ _soapBubbleEl.remove(); _soapBubbleEl = null; }catch(_){ _soapBubbleEl=null; } }, 300);
+    }catch(e){ _soapBubbleEl = null; }
+  }
+  let _soapBubbleEl = null;
+
+  function clearScheduledWindow(){
+    try{ if(_windowSchedule.showTimeout) clearTimeout(_windowSchedule.showTimeout); }catch(_){}
+    try{ if(_windowSchedule.bubbleTimeout) clearTimeout(_windowSchedule.bubbleTimeout); }catch(_){}
+    try{ if(_windowSchedule.bubbleAutoRemove) clearTimeout(_windowSchedule.bubbleAutoRemove); }catch(_){}
+    try{ if(_windowSchedule.windowEl){ _windowSchedule.windowEl.remove(); _windowSchedule.windowEl = null; } }catch(_){}
+    _windowSchedule = { showTimeout: null, bubbleTimeout: null, bubbleAutoRemove: null, windowEl: null, scheduledOpenMs: null };
+  }
+
+  function scheduleWindowOnGameStart(){
+    clearScheduledWindow();
+    const src = spawnConfig.windowSrc;
+    getMediaDurationSeconds(src, function(durSec){
+      const durMs = Math.round((Number(durSec) || 0) * 1000);
+      const showAfter = Math.max(0, GAME_DURATION_MS - durMs);
+      _windowSchedule.scheduledOpenMs = Date.now() + showAfter;
+      const bubbleAt = Math.max(0, showAfter - 5000);
+      _windowSchedule.showTimeout = setTimeout(()=>{
+        try{ _windowSchedule.windowEl = spawnWindowAtTopCenter({ src: src }); }catch(e){ console.warn('spawnWindowAtTopCenter failed', e); }
+      }, showAfter);
+      _windowSchedule.bubbleTimeout = setTimeout(()=>{
+        try{ showSoapBubble('창문이 5초 후에 열립니다!'); }catch(e){ console.warn('soap bubble failed', e); }
+      }, bubbleAt);
+      _windowSchedule.bubbleAutoRemove = setTimeout(()=>{ hideSoapBubble(); }, Math.max(0, showAfter + 100));
+    });
+  }
+
+  window.spawnWindowNow = function(){
+    clearScheduledWindow();
+    _windowSchedule.windowEl = spawnWindowAtTopCenter({ src: spawnConfig.windowSrc });
+  };
+
+  // -------- timer (display only) & gameover/clear --------
   let timerStart = null, timerAccum = 0, timerRunning = false, timerRAF = null;
   const timerEl = document.getElementById('timer');
   const timerLabel = timerEl ? timerEl.querySelector('.label') : null;
   const timerFill = timerEl ? timerEl.querySelector('.fill') : null;
   function formatMS(ms){ const s=Math.floor(ms/1000); const mm=Math.floor(s/60).toString().padStart(2,'0'); const ss=(s%60).toString().padStart(2,'0'); return `${mm}:${ss}`; }
-  function startTimer(){ if(timerRunning) return; timerRunning=true; timerStart=performance.now(); (function tick(now){ if(!timerRunning) return; const elapsed = timerAccum + (now - timerStart); if(timerLabel) timerLabel.textContent = formatMS(elapsed); if(timerFill) timerFill.style.width = `${Math.min(100,(elapsed/60000)*100)}%`; timerRAF = requestAnimationFrame(tick); })(performance.now()); }
+  function startTimer(){ if(timerRunning) return; timerRunning=true; timerStart=performance.now(); scheduleWindowOnGameStart(); (function tick(now){ if(!timerRunning) return; const elapsed = timerAccum + (now - timerStart); if(timerLabel) timerLabel.textContent = formatMS(Math.min(elapsed, GAME_DURATION_MS)); if(timerFill) timerFill.style.width = `${Math.min(100,(elapsed/GAME_DURATION_MS)*100)}%`; if(elapsed >= GAME_DURATION_MS){ try{ timerRunning = false; if(timerRAF) cancelAnimationFrame(timerRAF); timerAccum = GAME_DURATION_MS; }catch(_){ } return; } timerRAF = requestAnimationFrame(tick); })(performance.now()); }
   function pauseTimer(){ if(!timerRunning) return; timerRunning=false; if(timerRAF) cancelAnimationFrame(timerRAF); timerAccum += performance.now() - (timerStart || performance.now()); }
-  function resetTimer(){ timerRunning=false; if(timerRAF) cancelAnimationFrame(timerRAF); timerStart=null; timerAccum=0; if(timerLabel) timerLabel.textContent='00:00'; if(timerFill) timerFill.style.width='0%'; }
+  function resetTimer(){ timerRunning=false; if(timerRAF) cancelAnimationFrame(timerRAF); timerStart=null; timerAccum=0; if(timerLabel) timerLabel.textContent='00:00'; if(timerFill) timerFill.style.width='0%'; clearScheduledWindow(); }
 
   function triggerGameOver(msg){
     if(gameOver) return;
@@ -908,9 +1009,24 @@
     const gameOverModal = document.getElementById('gameOverModal');
     if(gameOverMsg) gameOverMsg.textContent = msg || '게임 오버';
     if(gameOverModal) gameOverModal.classList.add('visible');
+    clearScheduledWindow();
+    hideSoapBubble();
   }
 
-  // -------- movement loop (node-to-node) --------
+  function triggerGameClear(msg){
+    if(gameOver) return;
+    gameOver = true; moving = false;
+    try{ stopBucketLoop_inner(); }catch(e){}
+    try{ pauseTimer(); }catch(e){}
+    const gameClearMsg = document.getElementById('gameClearMsg');
+    const gameClearModal = document.getElementById('gameClearModal');
+    if(gameClearMsg) gameClearMsg.textContent = msg || '게임 클리어';
+    if(gameClearModal) gameClearModal.classList.add('visible');
+    clearScheduledWindow();
+    hideSoapBubble();
+  }
+
+  // -------- movement loop --------
   let lastTsMove = null;
   function loop(ts){
     if(gameOver) return;
@@ -980,7 +1096,7 @@
     if(!moving){ moving = true; lastTs = null; requestAnimationFrame(loop); }
   }, { passive:false });
 
-  // -------- countdown / dust effect --------
+  // -------- countdown / dust --------
   const countdownModal = document.getElementById('countdownModal');
   const countNumberEl = document.getElementById('countNumber');
 
@@ -1054,7 +1170,6 @@
               const dx = Math.abs(tx - spawnNode.i);
               const dy = Math.abs(ty - spawnNode.j);
               if(dx <= 1 && dy <= 1) continue;
-              // ensure board not adjacent to buckets
               if(isTileTooCloseToBucket(tx,ty)) continue;
               candidates.push({tx,ty});
             }
@@ -1085,7 +1200,6 @@
       startTimer();
       requestAnimationFrame(loop);
 
-      // schedule bucket start after configured delay
       setTimeout(()=>{
         try{ spawnInitialBuckets(2); }catch(e){ console.warn('spawnInitialBuckets failed', e); }
         try{ startBucketLoop_inner(); }catch(e){ console.warn('startBucketLoop_inner failed', e); }
@@ -1099,35 +1213,34 @@
     try{ initFlow(); }catch(e){ warnOnce('initFlowErr','initFlow failed: ' + (e && e.message)); }
   }, 120);
 
-  // expose clearAll - now cleans pre-spawn overlays and timers too
+  // expose clearAll
   window.clearAll = function(){
     try{ window.soapDyn && window.soapDyn.clearAll && window.soapDyn.clearAll(); }catch(e){}
     try{
-      // clear bucket timers and overlays
       document.querySelectorAll('.bucket').forEach(el=>{
         clearWarningAndTimersForEl(el);
         try{ el.remove(); }catch(_){}
       });
-      // clear pre-spawn overlays (class pre-spawn-warning)
       document.querySelectorAll('.pre-spawn-warning').forEach(el=>{
         try{ el._pulseInterval && clearInterval(el._pulseInterval); }catch(_){}
         try{ el.remove(); }catch(_){}
       });
-      // clear boards
       document.querySelectorAll('.board').forEach(el=>{ try{ el.remove(); }catch(_){}
       });
-      // reset soapDyn states
+      const win = document.querySelector('.game-window'); if(win) try{ win.remove(); }catch(_){}
       if(window.soapDyn && window.soapDyn._state){
         window.soapDyn._state.buckets = [];
         window.soapDyn._state.boards = [];
       }
+      clearScheduledWindow();
+      hideSoapBubble();
     }catch(e){}
     ourStopBucketLoop();
   };
 
   window.addEventListener('resize', ()=>{ computeGrid(); placeSoapAtNode(node.i, node.j, 'node'); });
 
-  // -------- helper: get tiles along soap's forward path (defined earlier but keep here) --------
+  // -------- helper: path tiles --------
   function getPathTiles(maxSteps){
     computeGrid();
     const tiles = [];
